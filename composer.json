@@ -1,5 +1,5 @@
 {
-  "name": "flownative/openid-connect-client",
+  "name": "flownative/openidconnect-client",
   "license": "MIT",
   "type": "neos-package",
   "description": "A generic Open ID Connect client base implementation for Flow Framework applications",
