@@ -1,0 +1,31 @@
+{
+  "name": "flownative/openid-connect-client",
+  "license": "MIT",
+  "type": "neos-package",
+  "description": "A generic Open ID Connect client base implementation for Flow Framework applications",
+  "authors": [
+    {
+      "name": "Robert Lemke",
+      "email": "robert@flownative.com",
+      "homepage": "https://www.flownative.com",
+      "role": "Developer"
+    }
+  ],
+  "support": {
+    "email": "support@flownative.com"
+  },
+  "require": {
+    "neos/flow": "^4.0 || ^5.0 || dev-master",
+    "guzzlehttp/guzzle": "6.3.*",
+    "flownative/oauth2-client": "^0.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "Flownative\\OpenIdConnect\\Client\\": "Classes"
+    }
+  },
+  "extra": {
+    "applied-flow-migrations": [
+    ]
+  }
+}
