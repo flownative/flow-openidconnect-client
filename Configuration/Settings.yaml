@@ -1,0 +1,9 @@
+Flownative:
+  OpenIdConnect:
+    Client:
+      services: []
+#        exampleService:
+#          options:
+#            discoveryUri: 'https://example.com/.well-known/openid-configuration'
+#            clientId: '@!EDD5.370D.8247.FED9!0001!B1C9.92C1!1008!13DB.54D8.65DE.2761'
+#            clientSecret: 'very-secret'

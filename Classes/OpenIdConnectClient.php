@@ -4,10 +4,13 @@ namespace Flownative\OpenIdConnect\Client;
 
 use Doctrine\ORM\OptimisticLockException;
 use Doctrine\ORM\ORMException;
+use Flownative\OAuth2\Client\OAuthToken;
+use Flownative\OpenIdConnect\Client\OAuthClient as OAuthClient;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\Uri;
+use Neos\Flow\Log\SystemLoggerInterface;
 use Neos\Flow\Session\Exception\SessionNotStartedException;
 use Neos\Utility\Arrays;
 
@@ -33,6 +36,12 @@ class OpenIdConnectClient
      * @var OAuthClient
      */
     protected $oAuthClient;
+
+    /**
+     * @Flow\Inject
+     * @var SystemLoggerInterface
+     */
+    protected $logger;
 
     /**
      * @const array
@@ -95,7 +104,7 @@ class OpenIdConnectClient
         }
 
         $this->oAuthClient = new OAuthClient($this->serviceName);
-        $this->oAuthClient->setOptions($this->options);
+        $this->oAuthClient->setOpenIdConnectClient($this);
     }
 
     /**
@@ -113,13 +122,12 @@ class OpenIdConnectClient
      */
     public function authenticate(Uri $returnToUri): ?Uri
     {
-        $oAuthToken = $this->oAuthClient->getOAuthToken();
-        if ($oAuthToken) {
-            return null;
-        }
-
         try {
-            $uri = $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri);
+            $oAuthToken = $this->oAuthClient->getOAuthToken();
+            if ($oAuthToken instanceof OAuthToken) {
+                return null;
+            }
+            $uri = $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, ['openid']);
         } catch (OptimisticLockException | ORMException | SessionNotStartedException $e) {
             throw new AuthenticationException(sprintf('OpenID Connect client: Authentication failed with error %s.', $e->getMessage()));
         }
