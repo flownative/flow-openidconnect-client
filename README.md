@@ -7,3 +7,8 @@
 This [Flow](https://flow.neos.io) package provides an [OpenID Connect](https://openid.net/connect/) client SDK.
 
 Note: this package is at an early stage, breaking changes may be released without further warning ...
+
+See also:
+
+https://openid.net/specs/openid-connect-basic-1_0.html
+https://connect2id.com/learn/openid-connect
