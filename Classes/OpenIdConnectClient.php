@@ -14,17 +14,17 @@ use Neos\Flow\Log\SystemLoggerInterface;
 use Neos\Flow\Session\Exception\SessionNotStartedException;
 use Neos\Utility\Arrays;
 
-class OpenIdConnectClient
+final class OpenIdConnectClient
 {
     /**
      * @var string
      */
-    protected $serviceName;
+    private $serviceName;
 
     /**
      * @var array
      */
-    protected $options;
+    private $options;
 
     /**
      * @Flow\InjectConfiguration
@@ -35,7 +35,12 @@ class OpenIdConnectClient
     /**
      * @var OAuthClient
      */
-    protected $oAuthClient;
+    private $oAuthClient;
+
+    /**
+     * @var array
+     */
+    private $jwks = [];
 
     /**
      * @Flow\Inject
@@ -53,6 +58,7 @@ class OpenIdConnectClient
         'authorizationEndpoint' => '',
         'tokenEndpoint' => '',
         'userInfoEndpoint' => '',
+        'jwksUri' => '',
         'scopesSupported' => ''
     ];
 
@@ -64,6 +70,7 @@ class OpenIdConnectClient
         'authorization_endpoint' => 'authorizationEndpoint',
         'token_endpoint' => 'tokenEndpoint',
         'userinfo_endpoint' => 'userInfoEndpoint',
+        'jwks_uri' => 'jwksUri',
         'scopes_supported' => 'scopesSupported'
     ];
 
@@ -97,7 +104,7 @@ class OpenIdConnectClient
             $this->amendOptionsWithDiscovery($this->options['discoveryUri']);
         }
 
-        foreach (['clientId', 'clientSecret', 'authorizationEndpoint', 'tokenEndpoint'] as $optionName) {
+        foreach (['clientId', 'clientSecret', 'authorizationEndpoint', 'tokenEndpoint', 'jwksUri'] as $optionName) {
             if (empty($this->options[$optionName])) {
                 throw new ConfigurationException(sprintf('OpenID Connect client: Required option "%s" is not configured for service "%s".', $optionName, $this->serviceName), 1554968498);
             }
@@ -132,6 +139,76 @@ class OpenIdConnectClient
             throw new AuthenticationException(sprintf('OpenID Connect client: Authentication failed with error %s.', $e->getMessage()));
         }
         return $uri;
+    }
+
+    /**
+     * Returns the current oAuth token, if any
+     *
+     * @return OAuthToken|null
+     * @throws ConnectionException
+     */
+    public function getOAuthToken(): ?OAuthToken
+    {
+        try {
+            $oAuthToken = $this->oAuthClient->getOAuthToken();
+        } catch (ORMException | OptimisticLockException $exception) {
+            throw new ConnectionException(sprintf('OpenID Connect client: Failed retrieving oAuth token: %s', $exception->getMessage()), 1559202394);
+        }
+        return $oAuthToken;
+    }
+
+    /**
+     * Returns the current OpenId Connect Identity Token
+     *
+     * @return IdentityToken
+     * @throws ConnectionException
+     * @throws ServiceException
+     */
+    public function getIdentityToken(): IdentityToken
+    {
+        $oAuthToken = $this->getOAuthToken();
+        if (!$oAuthToken instanceof OAuthToken) {
+            throw new ServiceException('OpenID Connect client: No oAuth token found', 1559202394);
+        }
+        $tokenValues = $oAuthToken->tokenValues;
+        if (!isset($tokenValues['id_token'])) {
+            throw new ServiceException('OpenID Connect client: No id_token found in values of current oAuth token', 1559208674);
+        }
+
+        $identityToken = IdentityToken::fromJWT($tokenValues['id_token']);
+        if (!$identityToken->hasValidSignature($this->getJwks())) {
+            throw new ServiceException('OpenID Connect client: The signature for the retrieved ID token was invalid', 1559210845);
+        }
+        return$identityToken;
+    }
+
+    /**
+     * Retrieves the JSON Web Keys from the endpoint configured via the "jwksUri" option
+     *
+     * @return array
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @see https://tools.ietf.org/html/rfc7517
+     */
+    private function getJwks(): array
+    {
+        if (count($this->jwks)) {
+            return $this->jwks;
+        }
+
+        $httpClient = new HttpClient();
+        try {
+            $response = $httpClient->request('GET', $this->options['jwksUri']);
+        } catch (GuzzleException $e) {
+            throw new ConnectionException(sprintf('OpenID Connect: Failed retrieving JWKs from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
+        }
+
+        $response = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
+        if (!is_array($response) || !isset($response['keys'])) {
+            throw new ServiceException(sprintf('OpenID Connect: Failed decoding response while retrieving JWKs from %s', $this->options['jwksUri']), 1559211340);
+        }
+        $this->jwks = $response['keys'];
+        return $this->jwks;
     }
 
     /**
