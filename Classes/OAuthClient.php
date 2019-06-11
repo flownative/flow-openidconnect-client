@@ -91,13 +91,11 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
 
     /**
      * @return string
-     * @throws ConfigurationException
      */
     public function getClientId(): string
     {
         $this->initializeOptionsIfNeeded();
         if (!isset($this->options['clientId'])) {
-            throw new ConfigurationException(sprintf('Missing configuration client id for service "%s" (%s). Make sure to provide the OpenID Connect client ID in your settings.', $this->getServiceName(), $this->getServiceType()), 1559028091);
         }
         return $this->options['clientId'];
     }

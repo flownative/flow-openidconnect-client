@@ -11,57 +11,19 @@ use phpseclib\Crypt\RSA;
 class IdentityToken
 {
     /**
-     * "sub"
-     * @var string
+     * @var array
      */
-    public $subject;
-
-    /**
-     * "iss"
-     * @var string
-     */
-    public $issuingAuthority;
-
-    /**
-     * "aud"
-     * @var string
-     */
-    public $audience;
-
-    /**
-     * "nonce"
-     * @var string
-     */
-    public $nonce;
-
-    /**
-     * "iat"
-     * @var \DateTimeImmutable
-     */
-    public $issueTime;
-
-    /**
-     * "auth_time"
-     * @var \DateTimeImmutable
-     */
-    public $authenticationTime;
-
-    /**
-     * "exp"
-     * @var \DateTimeImmutable
-     */
-    public $expirationTime;
-
-    /**
-     * "acr"
-     * @var string
-     */
-    public $authenticationContextClassReference;
+    public $values = [];
 
     /**
      * @var array
      */
     private $header;
+
+    /**
+     * @var string
+     */
+    private $jwt;
 
     /**
      * @var string
@@ -80,9 +42,10 @@ class IdentityToken
      * @return IdentityToken
      * @see https://tools.ietf.org/html/rfc7519
      */
-    public static function fromJWT(string $jwt): IdentityToken
+    public static function fromJwt(string $jwt): IdentityToken
     {
         $identityToken = new static();
+        $identityToken->jwt = $jwt;
 
         if (preg_match('/^[a-zA-Z0-9_-]+\.([a-zA-Z0-9_-]+\.)+[a-zA-Z0-9_-]+$/', $jwt) !== 1) {
             throw new \InvalidArgumentException('The given string was not a valid encoded identity token.', 1559204596);
@@ -116,30 +79,16 @@ class IdentityToken
             throw new \InvalidArgumentException('Failed decoding identity token from JWT.', 1559208043);
         }
 
-        foreach ($identityTokenArray as $key => $value) {
-            switch ($key) {
-                case 'iss':
-                    $identityToken->issuingAuthority = $value;
-                break;
-                case 'sub':
-                    $identityToken->subject = $value;
-                break;
-                case 'aud':
-                    $identityToken->audience = $value;
-                break;
-                case 'iat':
-                    $identityToken->issueTime = \DateTimeImmutable::createFromFormat('U', $value);
-                break;
-                case 'auth_time':
-                    $identityToken->authenticationTime = \DateTimeImmutable::createFromFormat('U', $value);
-                break;
-                case 'exp':
-                    $identityToken->expirationTime = \DateTimeImmutable::createFromFormat('U', $value);
-                break;
-            }
-        }
-
+        $identityToken->values = $identityTokenArray;
         return $identityToken;
+    }
+
+    /**
+     * @return string
+     */
+    public function asJwt(): string
+    {
+        return $this->jwt;
     }
 
     /**
@@ -240,5 +189,13 @@ class IdentityToken
             $base64UrlEncodedString .= str_repeat('=', 4 - $padding);
         }
         return base64_decode(strtr($base64UrlEncodedString, '-_', '+/'));
+    }
+
+    /**
+     * @return string
+     */
+    public function __toString(): string
+    {
+        return $this->asJwt();
     }
 }

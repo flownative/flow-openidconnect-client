@@ -1,0 +1,19 @@
+Flownative\OpenIdConnect\Client\OpenIdConnectClient:
+  properties:
+    discoveryCache:
+      object:
+        factoryObjectName: Neos\Flow\Cache\CacheManager
+        factoryMethodName: getCache
+        arguments:
+          1:
+            value: Flownative_OpenIdConnect_Client_Discovery
+
+Flownative\OpenIdConnect\Client\OAuthClient:
+  properties:
+    stateCache:
+      object:
+        factoryObjectName: Neos\Flow\Cache\CacheManager
+        factoryMethodName: getCache
+        arguments:
+          1:
+            value: Flownative_OAuth2_Client_State

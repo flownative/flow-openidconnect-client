@@ -4,15 +4,18 @@ namespace Flownative\OpenIdConnect\Client;
 
 use Doctrine\ORM\OptimisticLockException;
 use Doctrine\ORM\ORMException;
-use Flownative\OAuth2\Client\OAuthToken;
+use Flownative\OAuth2\Client\Authorization;
+use Flownative\OAuth2\Client\OAuthClientException;
+use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
+use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
 use Flownative\OpenIdConnect\Client\OAuthClient as OAuthClient;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
+use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\Uri;
-use Neos\Flow\Log\SystemLoggerInterface;
-use Neos\Flow\Session\Exception\SessionNotStartedException;
 use Neos\Utility\Arrays;
+use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectClient
 {
@@ -44,9 +47,14 @@ final class OpenIdConnectClient
 
     /**
      * @Flow\Inject
-     * @var SystemLoggerInterface
+     * @var LoggerInterface
      */
     protected $logger;
+
+    /**
+     * @var VariableFrontend
+     */
+    protected $discoveryCache;
 
     /**
      * @const array
@@ -87,6 +95,7 @@ final class OpenIdConnectClient
      *
      * @throws ConnectionException
      * @throws ConfigurationException
+     * @throws \Neos\Cache\Exception
      */
     protected function initializeObject(): void
     {
@@ -123,63 +132,61 @@ final class OpenIdConnectClient
     }
 
     /**
+     * @param string $serviceName
      * @param Uri $returnToUri
+     * @param array $scopes Additional scopes, "openid" will automatically be requested
      * @return Uri|null
-     * @throws AuthenticationException
+     * @throws OAuthClientException
      */
-    public function authenticate(Uri $returnToUri): ?Uri
+    public function authenticate(string $serviceName, Uri $returnToUri, array $scopes): ?Uri
     {
-        try {
-            $oAuthToken = $this->oAuthClient->getOAuthToken();
-            if ($oAuthToken instanceof OAuthToken) {
-                return null;
-            }
-            $uri = $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, ['openid']);
-        } catch (OptimisticLockException | ORMException | SessionNotStartedException $e) {
-            throw new AuthenticationException(sprintf('OpenID Connect client: Authentication failed with error %s.', $e->getMessage()));
-        }
-        return $uri;
+        $returnArguments = TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $serviceName]);
+        $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OID_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
+        $scopes = array_unique(array_merge($scopes, ['openid']));
+
+        return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $scopes);
     }
 
     /**
      * Returns the current oAuth token, if any
      *
-     * @return OAuthToken|null
+     * @param string $authorizationIdentifier
+     * @return Authorization|null
      * @throws ConnectionException
      */
-    public function getOAuthToken(): ?OAuthToken
+    public function getAuthorization(string $authorizationIdentifier): ?Authorization
     {
         try {
-            $oAuthToken = $this->oAuthClient->getOAuthToken();
+            $authorization = $this->oAuthClient->getAuthorization($authorizationIdentifier);
         } catch (ORMException | OptimisticLockException $exception) {
-            throw new ConnectionException(sprintf('OpenID Connect client: Failed retrieving oAuth token: %s', $exception->getMessage()), 1559202394);
+            throw new ConnectionException(sprintf('OpenID Connect client: Failed retrieving oAuth token %s: %s', $authorizationIdentifier, $exception->getMessage()), 1559202394);
         }
-        return $oAuthToken;
+        return $authorization;
     }
 
     /**
      * Returns the current OpenId Connect Identity Token
      *
+     * @param string $authorizationIdentifier
      * @return IdentityToken
      * @throws ConnectionException
      * @throws ServiceException
      */
-    public function getIdentityToken(): IdentityToken
+    public function getIdentityToken(string $authorizationIdentifier): ?IdentityToken
     {
-        $oAuthToken = $this->getOAuthToken();
-        if (!$oAuthToken instanceof OAuthToken) {
-            throw new ServiceException('OpenID Connect client: No oAuth token found', 1559202394);
+        $authorization = $this->getAuthorization($authorizationIdentifier);
+        if (!$authorization instanceof Authorization) {
+            return null;
         }
-        $tokenValues = $oAuthToken->tokenValues;
+        $tokenValues = $authorization->tokenValues;
         if (!isset($tokenValues['id_token'])) {
             throw new ServiceException('OpenID Connect client: No id_token found in values of current oAuth token', 1559208674);
         }
-
-        $identityToken = IdentityToken::fromJWT($tokenValues['id_token']);
+        $identityToken = IdentityToken::fromJwt($tokenValues['id_token']);
         if (!$identityToken->hasValidSignature($this->getJwks())) {
             throw new ServiceException('OpenID Connect client: The signature for the retrieved ID token was invalid', 1559210845);
         }
-        return$identityToken;
+        return $identityToken;
     }
 
     /**
@@ -214,20 +221,24 @@ final class OpenIdConnectClient
     /**
      * @param string $discoveryUri
      * @throws ConnectionException
+     * @throws \Neos\Cache\Exception
      */
     private function amendOptionsWithDiscovery(string $discoveryUri): void
     {
-        $httpClient = new HttpClient();
-
-        try {
-            $response = $httpClient->request('GET', $discoveryUri);
-        } catch (GuzzleException $e) {
-            throw new ConnectionException(sprintf('OpenID Connect: Failed discovering options at %s: %s', $discoveryUri, $e->getMessage()), 1554902567);
-        }
-
-        $discoveredOptions = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
-        if (!is_array($discoveredOptions)) {
-            throw new ConnectionException(sprintf('OpenID Connect: Discovery endpoint returned invalid response.'), 1554903349);
+        $discoveredOptions = $this->discoveryCache->get('options');
+        if (empty($discoveredOptions)) {
+            try {
+                $httpClient = new HttpClient();
+                $response = $httpClient->request('GET', $discoveryUri);
+            } catch (GuzzleException $e) {
+                throw new ConnectionException(sprintf('OpenID Connect: Failed discovering options at %s: %s', $discoveryUri, $e->getMessage()), 1554902567);
+            }
+            $discoveredOptions = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
+            if (!is_array($discoveredOptions)) {
+                throw new ConnectionException(sprintf('OpenID Connect: Discovery endpoint returned invalid response.'), 1554903349);
+            }
+            $this->discoveryCache->set('options', $discoveredOptions);
+            $this->logger->info(sprintf('OpenID Connect client: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri));
         }
 
         foreach ($discoveredOptions as $optionName => $optionValue) {

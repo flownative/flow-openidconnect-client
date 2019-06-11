@@ -42,7 +42,7 @@ final class OidcCommandController extends CommandController
             $this->outputLine('<error>Unknown service "%s".</error>', [$serviceName]);
             exit(1);
         }
-        if (!isset($this->settings['services'][$serviceName]['options']['discoveryUri'])) {
+        if (!isset($this->settings['services'][$serviceName]['options']['discoveryUri']) || empty($this->settings['services'][$serviceName]['options']['discoveryUri'])) {
             $this->outputLine('<error>Missing option "discoveryUri" for service "%s".</error>', [$serviceName]);
             exit(1);
         }
@@ -52,7 +52,7 @@ final class OidcCommandController extends CommandController
         try {
             $response = $httpClient->request('GET', $this->settings['services'][$serviceName]['options']['discoveryUri']);
         } catch (GuzzleException $e) {
-            $this->outputLine('<error>Failed discovering options at %s: %s</error>', [$this->settings['services']['options'][$serviceName]['discoveryUri'], $e->getMessage()]);
+            $this->outputLine('<error>Failed discovering options at via "%s:" %s</error>', [$this->settings['services'][$serviceName]['options']['discoveryUri'], $e->getMessage()]);
             exit(1);
         }
 
