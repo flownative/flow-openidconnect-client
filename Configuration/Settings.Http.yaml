@@ -1,0 +1,12 @@
+Neos:
+    Flow:
+      http:
+        chain:
+          'postprocess':
+            chain:
+              'Flownative.OpenIdConnect.Client:setJwtCookie':
+                'position': 'after setSessionCookie'
+                component: 'Flownative\OpenIdConnect\Client\Http\SetJwtCookieComponent'
+                componentOptions:
+                  cookieName: 'flownative_oidc_jwt'
+                  authenticationProviderName: 'Flownative.OpenIdConnect.Client:OidcProvider'

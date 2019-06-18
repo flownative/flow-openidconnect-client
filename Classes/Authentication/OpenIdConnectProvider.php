@@ -5,10 +5,10 @@ namespace Flownative\OpenIdConnect\Client\Authentication;
 use Flownative\OpenIdConnect\Client\AuthenticationException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Neos\Flow\Annotations as Flow;
-use Neos\Flow\Core\Bootstrap;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\Authentication\Provider\AbstractProvider;
 use Neos\Flow\Security\Authentication\TokenInterface;
+use Neos\Flow\Security\Exception as SecurityException;
 use Neos\Flow\Security\Exception\InvalidAuthenticationStatusException;
 use Neos\Flow\Security\Exception\NoSuchRoleException;
 use Neos\Flow\Security\Exception\UnsupportedAuthenticationTokenException;
@@ -27,18 +27,12 @@ final class OpenIdConnectProvider extends AbstractProvider
      * @Flow\Inject
      * @var LoggerInterface
      */
-    protected $systemLogger;
+    protected $logger;
 
     /**
      * @var array
      */
     protected $options = [];
-
-    /**
-     * @Flow\Inject
-     * @var Bootstrap
-     */
-    protected $bootstrap;
 
     /**
      * @return array
@@ -66,10 +60,13 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (!isset($this->options['accountIdentifierTokenValueName'])) {
             $this->options['accountIdentifierTokenValueName'] = 'sub';
         }
-
-        $identityToken = $authenticationToken->getIdentityToken();
-        if ($identityToken === null) {
-            $this->systemLogger->info(sprintf('OpenID Connect: Authentication needed, no active identity token found.'));
+        if (!isset($this->options['jwtCookieName'])) {
+            $this->options['jwtCookieName'] = 'flownative_oidc_jwt';
+        }
+        try {
+            $identityToken = $authenticationToken->extractIdentityToken($this->options['jwtCookieName']);
+        } catch (SecurityException $exception) {
+            $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
             return;
         }
 
@@ -80,6 +77,8 @@ final class OpenIdConnectProvider extends AbstractProvider
         $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $this->options['roles'], $identityToken->asJwt());
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
+
+        $this->logger->debug(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s.', $account->getAccountIdentifier(), $account->getAuthenticationProviderName()));
     }
 
     /**

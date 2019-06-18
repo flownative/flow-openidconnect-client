@@ -3,41 +3,34 @@ declare(strict_types = 1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Flownative\OAuth2\Client\OAuthClient;
+use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
-use Neos\Flow\Annotations as Flow;
+use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
+use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Mvc\ActionRequest;
 use Neos\Flow\Security\Authentication\Token\AbstractToken;
 use Neos\Flow\Security\Authentication\Token\SessionlessTokenInterface;
+use Neos\Flow\Security\Authentication\TokenInterface;
+use Neos\Flow\Security\Exception\AccessDeniedException;
+use Neos\Flow\Security\Exception\AuthenticationRequiredException;
 use Neos\Flow\Security\Exception\InvalidAuthenticationStatusException;
-use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectToken extends AbstractToken implements SessionlessTokenInterface
 {
-    public const OID_PARAMETER_NAME = 'flownative_oidc';
-
-    // FIXME: Hardcoded cookie name
-    public const JWT_COOKIE_NAME = 'flownative_jwt';
+    /**
+     * Name of the parameter used internally by this OpenID Connect client package in GET query parts
+     */
+    public const OIDC_PARAMETER_NAME = 'flownative_oidc';
 
     /**
-     * @var string
+     * @var array
      */
-    private $stateIdentifier;
+    protected $queryParameters;
 
     /**
-     * @var string
+     * @var array
      */
-    private $serviceName;
-
-    /**
-     * @var IdentityToken
-     */
-    private $identityToken;
-
-    /**
-     * @Flow\Inject
-     * @var LoggerInterface
-     */
-    protected $logger;
+    protected $cookies = [];
 
     /**
      * @param ActionRequest $actionRequest
@@ -45,79 +38,64 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
      */
     public function updateCredentials(ActionRequest $actionRequest): void
     {
-        $request = $actionRequest->getHttpRequest();
-
-        $jwt = $request->getCookieParams()[self::JWT_COOKIE_NAME] ?? null;
-        if (!is_string($jwt) || $jwt === '') {
-            return;
-        }
-
-        try {
-            $this->identityToken = IdentityToken::fromJwt($jwt);
-        } catch (\InvalidArgumentException $exception) {
-            $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
-            $this->logger->error(sprintf($exception->getMessage()));
-            return;
-        }
-
         $this->setAuthenticationStatus(self::AUTHENTICATION_NEEDED);
+        $httpRequest = $actionRequest->getHttpRequest();
 
-        $queryParameters = $actionRequest->getHttpRequest()->getQueryParams();
-        if (!isset($queryParameters[self::OID_PARAMETER_NAME])) {
-            return;
+        $this->queryParameters = $httpRequest->getQueryParams();
+        $this->cookies = $httpRequest->getCookieParams();
+    }
+
+    /**
+     * @param string $cookieName
+     * @return IdentityToken
+     * @throws AccessDeniedException
+     * @throws AuthenticationRequiredException
+     * @throws InvalidAuthenticationStatusException
+     */
+    public function extractIdentityToken(string $cookieName): IdentityToken
+    {
+        if (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
+            if (!isset($this->queryParameters[OAuthClient::STATE_QUERY_PARAMETER_NAME])) {
+                throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', OAuthClient::STATE_QUERY_PARAMETER_NAME), 1560350311);
+            }
+            try {
+                $tokenArguments = TokenArguments::fromSignedString($this->queryParameters[self::OIDC_PARAMETER_NAME]);
+            } catch (\InvalidArgumentException $exception) {
+                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
+                throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
+            }
+
+            $authorizationIdentifier = $this->queryParameters[OAuthClient::STATE_QUERY_PARAMETER_NAME];
+            $client = new OpenIdConnectClient($tokenArguments[TokenArguments::SERVICE_NAME]);
+
+            try {
+                return $client->getIdentityToken($authorizationIdentifier);
+            } catch (ServiceException | ConnectionException $exception) {
+                throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s"', $authorizationIdentifier), 1560350413, $exception);
+            }
         }
 
+        return $this->extractIdentityTokenFromCookie($cookieName);
+    }
+
+    /**
+     * @param string $cookieName
+     * @return IdentityToken
+     * @throws AccessDeniedException | AuthenticationRequiredException | InvalidAuthenticationStatusException
+     */
+    private function extractIdentityTokenFromCookie(string $cookieName): IdentityToken
+    {
+        $jwt = $this->cookies[$cookieName] ?? null;
+        if (!is_string($jwt) || $jwt === '') {
+            $this->setAuthenticationStatus(TokenInterface::NO_CREDENTIALS_GIVEN);
+            throw new AuthenticationRequiredException(sprintf('Missing/empty cookie "%s"', $cookieName), 1560349409);
+        }
         try {
-            $tokenArguments = TokenArguments::fromSignedString($queryParameters[self::OID_PARAMETER_NAME]);
+            $identityToken = IdentityToken::fromJwt($jwt);
         } catch (\InvalidArgumentException $exception) {
-            $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
-            $this->logger->error(sprintf($exception->getMessage()));
-            return;
+            $this->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
+            throw new AccessDeniedException(sprintf('Could not extract JWT from cookie "%s"', $cookieName), 1560349541, $exception);
         }
-
-        $this->logger->info(sprintf('OpenID Connect: Received request with %s parameter', self::OID_PARAMETER_NAME));
-
-        $this->stateIdentifier = $queryParameters[OAuthClient::STATE_QUERY_PARAMETER_NAME] ?? null;
-        $this->serviceName = $tokenArguments[TokenArguments::SERVICE_NAME];
-    }
-
-    /**
-     * @return bool
-     */
-    public function isEmpty(): bool
-    {
-        return !($this->serviceName !== null && $this->stateIdentifier !== null);
-    }
-
-    /**
-     * @return string
-     */
-    public function authorizationIdentifier(): string
-    {
-        return $this->stateIdentifier;
-    }
-
-    /**
-     * @return string
-     */
-    public function getServiceName(): string
-    {
-        return $this->serviceName;
-    }
-
-    /**
-     * @return IdentityToken|null
-     */
-    public function getIdentityToken(): ?IdentityToken
-    {
-        return $this->identityToken;
-    }
-
-    /**
-     * @return string
-     */
-    public function __toString()
-    {
-        return (string)$this->identityToken;
+        return $identityToken;
     }
 }

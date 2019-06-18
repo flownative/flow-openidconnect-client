@@ -141,7 +141,7 @@ final class OpenIdConnectClient
     public function authenticate(string $serviceName, Uri $returnToUri, array $scopes): ?Uri
     {
         $returnArguments = TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $serviceName]);
-        $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OID_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
+        $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
         $scopes = array_unique(array_merge($scopes, ['openid']));
 
         return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $scopes);

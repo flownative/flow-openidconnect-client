@@ -12,3 +12,9 @@ See also:
 
 https://openid.net/specs/openid-connect-basic-1_0.html
 https://connect2id.com/learn/openid-connect
+
+## Authentication Flow
+
+Authentication works as follows:
+
+...

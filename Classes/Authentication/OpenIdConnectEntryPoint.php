@@ -26,23 +26,35 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
      */
     public function startAuthentication(Request $request, Response $response): void
     {
-        if (!isset($this->options['serviceName'])) {
-            throw new ConfigurationException('OpenID Connect: "serviceName" option was not configured for OpenIdConnectEntryPoint', 1559898606);
-        }
+        $this->validateOptions();
 
-        if (isset($this->options['scopes']) && !is_array($this->options['scopes'])) {
-            throw new ConfigurationException('OpenID Connect: "scopes" option was not configured correctly for OpenIdConnectEntryPoint', 1560259102);
-        }
+
+
+        $this->logger->debug(sprintf('OpenID Connect: OpenIdConnectEntryPoint starting authentication for service "%s" ...', $this->options['serviceName']));
+
         $client = new OpenIdConnectClient($this->options['serviceName']);
         $providerUri = $client->authenticate($this->options['serviceName'], $request->getUri(), $this->options['scopes'] ?? []);
         if ($providerUri === null) {
-            $this->logger->error(sprintf('OpenID Connect: Flow authentication entry point for service "%s" could not determine a provider URI for redirect', $this->options['serviceName']));
+            $this->logger->error(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" could not determine a provider URI for redirect', $this->options['serviceName']));
             return;
         }
 
-        $this->logger->info(sprintf('OpenID Connect: Flow authentication entry point redirecting to %s', $providerUri));
+        $this->logger->info(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" redirecting to %s', $this->options['serviceName'], $providerUri));
         $response->setContent(sprintf('<html lang="en"><head><meta http-equiv="refresh" content="0;url=%s"/><title>OpenID Connect</title></head></html>', htmlentities((string)$providerUri, ENT_QUOTES, 'utf-8')));
         $response->setStatus(303);
         $response->setHeader('Location', (string)$providerUri);
+    }
+
+    /**
+     * @throws ConfigurationException
+     */
+    private function validateOptions(): void
+    {
+        if (!isset($this->options['serviceName'])) {
+            throw new ConfigurationException('OpenID Connect: "serviceName" option was not configured for OpenIdConnectEntryPoint', 1559898606);
+        }
+        if (isset($this->options['scopes']) && !is_array($this->options['scopes'])) {
+            throw new ConfigurationException('OpenID Connect: "scopes" option was not configured correctly for OpenIdConnectEntryPoint', 1560259102);
+        }
     }
 }

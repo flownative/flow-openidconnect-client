@@ -8,14 +8,34 @@ Flownative:
 #            clientId: '@!EDD5.370D.8247.FED9!0001!B1C9.92C1!1008!13DB.54D8.65DE.2761'
 #            clientSecret: 'very-secret'
 
+#Neos:
+#  Flow:
+#    http:
+#      chain:
+#        'postprocess':
+#          chain:
+#            'Flownative.OpenIdConnect.Client:setJwtCookie':
+#              componentOptions:
+#                cookieName: 'your-own-cookie-name-jwt'
 
-Neos:
-  Flow:
-    http:
-      chain:
-        'process':
-          chain:
-            'OpenIdConnect':
-              position: 'after routing'
-              component: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectHttpComponent'
-              componentOptions: []
+#    security:
+#      authentication:
+#        providers:
+#          'Flownative.OpenIdConnect.Client:OidcProvider':
+#            label: 'OpenID Connect'
+#            provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
+#            providerOptions:
+#              roles: ['Acme.MyPackage:User']
+#              accountIdentifierTokenValueName: 'inum'
+#              jwtCookieName: 'your-own-cookie-name-jwt'
+#            token: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken'
+#            requestPatterns:
+#              'Acme.MyPackage:Frontend':
+#                pattern: 'Acme\MyPackage\Security\SiteRequestPattern'
+#                patternOptions:
+#                  'siteNodeName': 'mysite'
+#                  'matchFrontend': true
+#            entryPoint: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectEntryPoint'
+#            entryPointOptions:
+#              serviceName: 'acmeservice'
+#              scopes: ['inum', 'user_name', 'sap_custno']
