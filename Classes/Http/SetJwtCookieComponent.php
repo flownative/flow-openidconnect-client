@@ -86,7 +86,7 @@ final class SetJwtCookieComponent implements ComponentInterface
     {
         // TODO secure cookie by default
         $jwtCookie = new Cookie($this->options['cookieName'], $jwt, 0, null, null, '/', false, false);
-        $componentContext->replaceHttpResponse($componentContext->getHttpResponse()->withHeader('Set-Cookie', (string)$jwtCookie));
+        $componentContext->replaceHttpResponse($componentContext->getHttpResponse()->withAddedHeader('Set-Cookie', (string)$jwtCookie));
     }
 
     /**
@@ -94,8 +94,7 @@ final class SetJwtCookieComponent implements ComponentInterface
      */
     private function removeJwtCookie(ComponentContext $componentContext): void
     {
-        // FIXME this removed all cookies
         $emptyJwtCookie = new Cookie($this->options['cookieName'], '', 1, null, null, '/', false, false);
-        $componentContext->replaceHttpResponse($componentContext->getHttpResponse()->withHeader('Set-Cookie', (string)$emptyJwtCookie));
+        $componentContext->replaceHttpResponse($componentContext->getHttpResponse()->withAddedHeader('Set-Cookie', (string)$emptyJwtCookie));
     }
 }
