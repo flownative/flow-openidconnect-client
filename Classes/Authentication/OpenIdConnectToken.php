@@ -46,13 +46,16 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     }
 
     /**
-     * @param string $cookieName
-     * @return IdentityToken
+     * Extract an identity token from either the query parameters of the current request (in case we
+     * just return from an authentication redirect) or from a given JWT cookie (for subsequent requests).
+     *
+     * @param string $cookieName Name of the cookie the token is stored in
+     * @return IdentityToken A syntactically valid but not verified (signature, expiration) token
      * @throws AccessDeniedException
      * @throws AuthenticationRequiredException
      * @throws InvalidAuthenticationStatusException
      */
-    public function extractIdentityToken(string $cookieName): IdentityToken
+    public function extractIdentityTokenFromRequest(string $cookieName): IdentityToken
     {
         if (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
             if (!isset($this->queryParameters[OAuthClient::STATE_QUERY_PARAMETER_NAME])) {
@@ -69,13 +72,16 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
             $client = new OpenIdConnectClient($tokenArguments[TokenArguments::SERVICE_NAME]);
 
             try {
-                return $client->getIdentityToken($authorizationIdentifier);
+                $identityToken = $client->getIdentityToken($authorizationIdentifier);
             } catch (ServiceException | ConnectionException $exception) {
                 throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s"', $authorizationIdentifier), 1560350413, $exception);
             }
+        } else {
+            $identityToken = $this->extractIdentityTokenFromCookie($cookieName);
         }
 
-        return $this->extractIdentityTokenFromCookie($cookieName);
+        // NOTE: This token is not verified yet – signature and expiration time must be checked by code using this token
+        return $identityToken;
     }
 
     /**

@@ -1,6 +1,8 @@
 <?php
 namespace Flownative\OpenIdConnect\Client;
 
+use Lcobucci\JWT\Parser;
+use Lcobucci\JWT\Token;
 use phpseclib\Crypt\RSA;
 
 /**
@@ -24,6 +26,11 @@ class IdentityToken
      * @var string
      */
     private $jwt;
+
+    /**
+     * @var Token
+     */
+    private $parsedJwt;
 
     /**
      * @var string
@@ -80,6 +87,8 @@ class IdentityToken
         }
 
         $identityToken->values = $identityTokenArray;
+        $identityToken->parsedJwt = (new Parser())->parse($jwt);
+
         return $identityToken;
     }
 
@@ -120,8 +129,16 @@ class IdentityToken
             default:
                 throw new ServiceException(sprintf('Unsupported JWT signature type %s.', $this->header['alg']), 1559213623);
         }
-
         return $isValid;
+    }
+
+    /**
+     * @param \DateTimeInterface $now
+     * @return bool
+     */
+    public function isExpiredAt(\DateTimeInterface $now): bool
+    {
+        return $this->parsedJwt->isExpired($now);
     }
 
     /**

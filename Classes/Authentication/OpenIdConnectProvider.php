@@ -3,7 +3,10 @@ declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Flownative\OpenIdConnect\Client\AuthenticationException;
+use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
+use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
+use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\Authentication\Provider\AbstractProvider;
@@ -44,10 +47,12 @@ final class OpenIdConnectProvider extends AbstractProvider
 
     /**
      * @param TokenInterface $authenticationToken
+     * @throws AuthenticationException
+     * @throws ConnectionException
      * @throws InvalidAuthenticationStatusException
      * @throws NoSuchRoleException
+     * @throws ServiceException
      * @throws UnsupportedAuthenticationTokenException
-     * @throws AuthenticationException
      */
     public function authenticate(TokenInterface $authenticationToken): void
     {
@@ -57,6 +62,9 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (!isset($this->options['roles'])) {
             throw new \RuntimeException(sprintf('Missing "roles" option in the configuration of OpenID Connect authentication provider'), 1559806095);
         }
+        if (!isset($this->options['serviceName'])) {
+            throw new \RuntimeException(sprintf('Missing "serviceName" option in the configuration of OpenID Connect authentication provider'), 1561480057);
+        }
         if (!isset($this->options['accountIdentifierTokenValueName'])) {
             $this->options['accountIdentifierTokenValueName'] = 'sub';
         }
@@ -64,9 +72,20 @@ final class OpenIdConnectProvider extends AbstractProvider
             $this->options['jwtCookieName'] = 'flownative_oidc_jwt';
         }
         try {
-            $identityToken = $authenticationToken->extractIdentityToken($this->options['jwtCookieName']);
+            $jwks = (new OpenIdConnectClient($this->options['serviceName']))->getJwks();
+            $identityToken = $authenticationToken->extractIdentityTokenFromRequest($this->options['jwtCookieName']);
+            if (!$identityToken->hasValidSignature($jwks)) {
+                throw new SecurityException(sprintf('Open ID Connect: The identity token provided by the OIDC provider had an invalid signature'), 1561479176);
+            }
         } catch (SecurityException $exception) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
+            $this->logger->notice(sprintf('OpenID Connect: The authentication provider caught an exception: %s', $exception->getMessage()));
+            return;
+        }
+
+        if ($identityToken->isExpiredAt(new \DateTimeImmutable())) {
+            $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
+            $this->logger->info(sprintf('OpenID Connect: The JWT token "%s" is expired, need to re-authenticate', $identityToken->values[$this->options['accountIdentifierTokenValueName']]));
             return;
         }
 

@@ -28,8 +28,6 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
     {
         $this->validateOptions();
 
-
-
         $this->logger->debug(sprintf('OpenID Connect: OpenIdConnectEntryPoint starting authentication for service "%s" ...', $this->options['serviceName']));
 
         $client = new OpenIdConnectClient($this->options['serviceName']);

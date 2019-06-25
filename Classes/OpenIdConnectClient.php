@@ -182,11 +182,7 @@ final class OpenIdConnectClient
         if (!isset($tokenValues['id_token'])) {
             throw new ServiceException('OpenID Connect client: No id_token found in values of current oAuth token', 1559208674);
         }
-        $identityToken = IdentityToken::fromJwt($tokenValues['id_token']);
-        if (!$identityToken->hasValidSignature($this->getJwks())) {
-            throw new ServiceException('OpenID Connect client: The signature for the retrieved ID token was invalid', 1559210845);
-        }
-        return $identityToken;
+        return IdentityToken::fromJwt($tokenValues['id_token']);
     }
 
     /**
@@ -197,7 +193,7 @@ final class OpenIdConnectClient
      * @throws ServiceException
      * @see https://tools.ietf.org/html/rfc7517
      */
-    private function getJwks(): array
+    public function getJwks(): array
     {
         if (count($this->jwks)) {
             return $this->jwks;
