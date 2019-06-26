@@ -3,9 +3,9 @@ declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Http;
 
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
+use Flownative\OpenIdConnect\Client\AuthenticationException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Neos\Flow\Annotations as Flow;
-use Neos\Flow\Exception;
 use Neos\Flow\Http\Component\ComponentContext;
 use Neos\Flow\Http\Component\ComponentInterface;
 use Neos\Flow\Http\Cookie;
@@ -45,10 +45,10 @@ final class SetJwtCookieComponent implements ComponentInterface
             $this->logger->debug(sprintf('OpenID Connect Client: (%s) Cannot send JWT cookie because the security context could not be initialized.', get_class($this)));
             return;
         }
-
         if (!$this->isOpenIdConnectAuthentication()) {
             return;
         }
+
         $account = $this->securityContext->getAccountByAuthenticationProviderName($this->options['authenticationProviderName']);
         if ($account === null) {
             $this->logger->info(sprintf('OpenID Connect Client: (%s) No Flow account found for %s, removing JWT cookie.', get_class($this), $this->options['authenticationProviderName']));
@@ -84,8 +84,7 @@ final class SetJwtCookieComponent implements ComponentInterface
      */
     private function setJwtCookie(ComponentContext $componentContext, string $jwt): void
     {
-        // TODO secure cookie by default
-        $jwtCookie = new Cookie($this->options['cookieName'], $jwt, 0, null, null, '/', false, false);
+        $jwtCookie = new Cookie($this->options['cookieName'], $jwt, 0, null, null, '/', $this->options['secureCookie'], false);
         $componentContext->replaceHttpResponse($componentContext->getHttpResponse()->withAddedHeader('Set-Cookie', (string)$jwtCookie));
     }
 
@@ -94,7 +93,7 @@ final class SetJwtCookieComponent implements ComponentInterface
      */
     private function removeJwtCookie(ComponentContext $componentContext): void
     {
-        $emptyJwtCookie = new Cookie($this->options['cookieName'], '', 1, null, null, '/', false, false);
+        $emptyJwtCookie = new Cookie($this->options['cookieName'], '', 1, null, null, '/', $this->options['secureCookie'], false);
         $componentContext->replaceHttpResponse($componentContext->getHttpResponse()->withAddedHeader('Set-Cookie', (string)$emptyJwtCookie));
     }
 }

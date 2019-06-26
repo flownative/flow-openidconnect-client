@@ -9,4 +9,5 @@ Neos:
                 component: 'Flownative\OpenIdConnect\Client\Http\SetJwtCookieComponent'
                 componentOptions:
                   cookieName: 'flownative_oidc_jwt'
+                  secureCookie: true
                   authenticationProviderName: 'Flownative.OpenIdConnect.Client:OidcProvider'
