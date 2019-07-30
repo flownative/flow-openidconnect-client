@@ -28,7 +28,7 @@ Note: this package is at an early stage, breaking changes may be released withou
               chain:
                 'Flownative.OpenIdConnect.Client:setJwtCookie':
                   componentOptions:
-                    cookieName: 'your-own-cookie-name-jwt'
+                    serviceName: 'acmeservice'
                     secureCookie: false
 
         security:
@@ -40,8 +40,7 @@ Note: this package is at an early stage, breaking changes may be released withou
                 providerOptions:
                   roles: ['Acme.MyPackage:User']
                   accountIdentifierTokenValueName: 'inum'
-                  jwtCookieName: 'your-own-cookie-name-jwt'
-                  serviceName: 'exampleService'
+                  serviceName: 'acmeservice'
                 token: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken'
                 requestPatterns:
                   'Acme.MyPackage:Frontend':

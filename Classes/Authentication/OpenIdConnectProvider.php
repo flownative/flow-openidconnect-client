@@ -68,12 +68,11 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (!isset($this->options['accountIdentifierTokenValueName'])) {
             $this->options['accountIdentifierTokenValueName'] = 'sub';
         }
-        if (!isset($this->options['jwtCookieName'])) {
-            $this->options['jwtCookieName'] = 'flownative_oidc_jwt';
-        }
+        $serviceName = $this->options['serviceName'];
+        $jwtCookieName = $serviceName . '-jwt';
         try {
-            $jwks = (new OpenIdConnectClient($this->options['serviceName']))->getJwks();
-            $identityToken = $authenticationToken->extractIdentityTokenFromRequest($this->options['jwtCookieName']);
+            $jwks = (new OpenIdConnectClient($serviceName))->getJwks();
+            $identityToken = $authenticationToken->extractIdentityTokenFromRequest($jwtCookieName);
             if (!$identityToken->hasValidSignature($jwks)) {
                 throw new SecurityException(sprintf('Open ID Connect: The identity token provided by the OIDC provider had an invalid signature'), 1561479176);
             }

@@ -8,6 +8,6 @@ Neos:
               'position': 'after setSessionCookie'
               component: 'Flownative\OpenIdConnect\Client\Http\SetJwtCookieComponent'
               componentOptions:
-                cookieName: 'flownative_oidc_jwt'
+                serviceName: 'flownative_oidc'
                 secureCookie: true
                 authenticationProviderName: 'Flownative.OpenIdConnect.Client:OidcProvider'
