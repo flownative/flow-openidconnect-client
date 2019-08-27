@@ -3,8 +3,8 @@ declare(strict_types = 1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Neos\Flow\Annotations as Flow;
+use Neos\Flow\Log\PsrSystemLoggerInterface;
 use Neos\Flow\Security\Cryptography\HashService;
-use Neos\Flow\Security\Exception\InvalidArgumentForHashGenerationException;
 use Neos\Flow\Security\Exception\InvalidHashException;
 
 final class TokenArguments implements \ArrayAccess
@@ -17,6 +17,12 @@ final class TokenArguments implements \ArrayAccess
      * @var HashService
      */
     protected $hashService;
+
+    /**
+     * @Flow\Inject
+     * @var PsrSystemLoggerInterface
+     */
+    protected $logger;
 
     /**
      * @var array
@@ -105,12 +111,15 @@ final class TokenArguments implements \ArrayAccess
 
     /**
      * @return string
-     * @throws InvalidArgumentForHashGenerationException
      */
     public function __toString(): string
     {
         $json = json_encode($this->payload);
-        $hmac = $this->hashService->generateHmac($json);
+        try {
+            $hmac = $this->hashService->generateHmac($json);
+        } catch (\Throwable $throwable) {
+            return 'ERROR: ' . $throwable->getMessage();
+        }
         return base64_encode($json . $hmac);
     }
 }

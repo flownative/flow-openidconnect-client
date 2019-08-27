@@ -48,7 +48,6 @@ final class SetJwtCookieComponent implements ComponentInterface
         if (!$this->isOpenIdConnectAuthentication()) {
             return;
         }
-
         $account = $this->securityContext->getAccountByAuthenticationProviderName($this->options['authenticationProviderName']);
         if ($account === null) {
             $this->logger->info(sprintf('OpenID Connect Client: (%s) No Flow account found for %s, removing JWT cookie.', get_class($this), $this->options['authenticationProviderName']));

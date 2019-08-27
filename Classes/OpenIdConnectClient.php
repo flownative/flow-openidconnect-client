@@ -140,7 +140,10 @@ final class OpenIdConnectClient
      */
     public function authenticate(string $serviceName, Uri $returnToUri, array $scopes): ?Uri
     {
-        $returnArguments = TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $serviceName]);
+        $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $serviceName]);
+        if (strpos($returnArguments, 'ERROR') === 0) {
+            return null;
+        }
         $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
         $scopes = array_unique(array_merge($scopes, ['openid']));
 
