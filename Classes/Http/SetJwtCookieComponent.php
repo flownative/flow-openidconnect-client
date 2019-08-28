@@ -3,7 +3,6 @@ declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Http;
 
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
-use Flownative\OpenIdConnect\Client\AuthenticationException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\Component\ComponentContext;
