@@ -18,6 +18,7 @@ use Neos\Flow\Security\Exception\InvalidAuthenticationStatusException;
 use Neos\Flow\Security\Exception\NoSuchRoleException;
 use Neos\Flow\Security\Exception\UnsupportedAuthenticationTokenException;
 use Neos\Flow\Security\Policy\PolicyService;
+use Neos\Flow\Security\Policy\Role;
 
 final class OpenIdConnectProvider extends AbstractProvider
 {
@@ -105,7 +106,18 @@ final class OpenIdConnectProvider extends AbstractProvider
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
         $this->logger->debug(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s.', $account->getAccountIdentifier(), $account->getAuthenticationProviderName()));
+
+        $this->emitAuthenticated($authenticationToken, $identityToken, $this->policyService->getRoles());
     }
+
+    /**
+     * @param TokenInterface $authenticationToken
+     * @param IdentityToken $identityToken
+     * @param Role[] $roles
+     * @return void
+     * @Flow\Signal()
+     */
+    public function emitAuthenticated(TokenInterface $authenticationToken, IdentityToken $identityToken, array $roles): void {}
 
     /**
      * @param string $accountIdentifier
