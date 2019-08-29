@@ -13,6 +13,7 @@ use Neos\Flow\Security\Authentication\Token\SessionlessTokenInterface;
  * are serialized and added to the current session. This is a problem for sessionless tokens, which need to be
  * updated on every request on not just once per session.
  *
+ * @see https://github.com/neos/flow-development-collection/issues/1614
  * @Flow\Aspect()
  */
 class SessionlessTokenBugfixAspect

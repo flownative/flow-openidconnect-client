@@ -8,18 +8,25 @@ use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Annotations as Flow;
+use Neos\Flow\Log\PsrSystemLoggerInterface;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\Authentication\Provider\AbstractProvider;
 use Neos\Flow\Security\Authentication\TokenInterface;
+use Neos\Flow\Security\Context;
 use Neos\Flow\Security\Exception as SecurityException;
 use Neos\Flow\Security\Exception\InvalidAuthenticationStatusException;
 use Neos\Flow\Security\Exception\NoSuchRoleException;
 use Neos\Flow\Security\Exception\UnsupportedAuthenticationTokenException;
 use Neos\Flow\Security\Policy\PolicyService;
-use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectProvider extends AbstractProvider
 {
+    /**
+     * @Flow\Inject
+     * @var Context
+     */
+    protected $securityContext;
+
     /**
      * @Flow\Inject
      * @var PolicyService
@@ -28,7 +35,7 @@ final class OpenIdConnectProvider extends AbstractProvider
 
     /**
      * @Flow\Inject
-     * @var LoggerInterface
+     * @var PsrSystemLoggerInterface
      */
     protected $logger;
 
