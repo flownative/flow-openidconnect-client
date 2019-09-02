@@ -8,26 +8,44 @@ use Flownative\OAuth2\Client\Authorization;
 use Flownative\OAuth2\Client\OAuthClientException;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
-use Flownative\OpenIdConnect\Client\OAuthClient as OAuthClient;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
+use Neos\Cache\Exception as CacheException;
 use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\Uri;
+use Neos\Flow\Log\PsrSystemLoggerInterface;
 use Neos\Utility\Arrays;
-use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectClient
 {
     /**
+     * Service name which identifies the configuration of this OpenID Connect Client instance
+     *
      * @var string
      */
     private $serviceName;
 
     /**
+     * Options set for this client
+     *
      * @var array
      */
     private $options;
+
+    /**
+     * Instance of the OAuth Client used for authorization
+     *
+     * @var OAuthClient
+     */
+    private $oAuthClient;
+
+    /**
+     * The JSON Web Key Set to use for verifying JSON Web Tokens (JWT)
+     *
+     * @var array
+     */
+    private $jwks = [];
 
     /**
      * @Flow\InjectConfiguration
@@ -36,18 +54,8 @@ final class OpenIdConnectClient
     protected $settings;
 
     /**
-     * @var OAuthClient
-     */
-    private $oAuthClient;
-
-    /**
-     * @var array
-     */
-    private $jwks = [];
-
-    /**
      * @Flow\Inject
-     * @var LoggerInterface
+     * @var PsrSystemLoggerInterface
      */
     protected $logger;
 
@@ -95,7 +103,7 @@ final class OpenIdConnectClient
      *
      * @throws ConnectionException
      * @throws ConfigurationException
-     * @throws \Neos\Cache\Exception
+     * @throws CacheException
      */
     protected function initializeObject(): void
     {
@@ -181,7 +189,11 @@ final class OpenIdConnectClient
         if (!$authorization instanceof Authorization) {
             return null;
         }
-        $tokenValues = $authorization->tokenValues;
+        $accessToken = $authorization->getAccessToken();
+        if (!$accessToken) {
+            return null;
+        }
+        $tokenValues = $accessToken->getValues();
         if (!isset($tokenValues['id_token'])) {
             throw new ServiceException('OpenID Connect client: No id_token found in values of current oAuth token', 1559208674);
         }
@@ -189,7 +201,7 @@ final class OpenIdConnectClient
     }
 
     /**
-     * Retrieves the JSON Web Keys from the endpoint configured via the "jwksUri" option
+     * Retrieves the JSON Web Key Set from the endpoint configured via the "jwksUri" option
      *
      * @return array
      * @throws ConnectionException
@@ -206,12 +218,12 @@ final class OpenIdConnectClient
         try {
             $response = $httpClient->request('GET', $this->options['jwksUri']);
         } catch (GuzzleException $e) {
-            throw new ConnectionException(sprintf('OpenID Connect: Failed retrieving JWKs from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
+            throw new ConnectionException(sprintf('OpenID Connect: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
         }
 
         $response = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
         if (!is_array($response) || !isset($response['keys'])) {
-            throw new ServiceException(sprintf('OpenID Connect: Failed decoding response while retrieving JWKs from %s', $this->options['jwksUri']), 1559211340);
+            throw new ServiceException(sprintf('OpenID Connect: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
         }
         $this->jwks = $response['keys'];
         return $this->jwks;
@@ -220,7 +232,7 @@ final class OpenIdConnectClient
     /**
      * @param string $discoveryUri
      * @throws ConnectionException
-     * @throws \Neos\Cache\Exception
+     * @throws CacheException
      */
     private function amendOptionsWithDiscovery(string $discoveryUri): void
     {
