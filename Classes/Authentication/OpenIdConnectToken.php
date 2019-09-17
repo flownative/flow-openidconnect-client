@@ -58,8 +58,8 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     public function extractIdentityTokenFromRequest(string $cookieName): IdentityToken
     {
         if (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
-            if (!isset($this->queryParameters[OAuthClient::STATE_QUERY_PARAMETER_NAME])) {
-                throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', OAuthClient::STATE_QUERY_PARAMETER_NAME), 1560350311);
+            if (!isset($this->queryParameters[OAuthClient::AUTHORIZATION_ID_QUERY_PARAMETER_NAME])) {
+                throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', OAuthClient::AUTHORIZATION_ID_QUERY_PARAMETER_NAME), 1560350311);
             }
             try {
                 $tokenArguments = TokenArguments::fromSignedString($this->queryParameters[self::OIDC_PARAMETER_NAME]);
@@ -68,13 +68,13 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
                 throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
             }
 
-            $authorizationIdentifier = $this->queryParameters[OAuthClient::STATE_QUERY_PARAMETER_NAME];
+            $authorizationIdentifier = $this->queryParameters[OAuthClient::AUTHORIZATION_ID_QUERY_PARAMETER_NAME];
             $client = new OpenIdConnectClient($tokenArguments[TokenArguments::SERVICE_NAME]);
 
             try {
                 $identityToken = $client->getIdentityToken($authorizationIdentifier);
             } catch (ServiceException | ConnectionException $exception) {
-                throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s"', $authorizationIdentifier), 1560350413, $exception);
+                throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s": %s', $authorizationIdentifier, $exception->getMessage()), 1560350413, $exception);
             }
         } else {
             $identityToken = $this->extractIdentityTokenFromCookie($cookieName);
