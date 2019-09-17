@@ -41,7 +41,7 @@ final class SetJwtCookieComponent implements ComponentInterface
     public function handle(ComponentContext $componentContext): void
     {
         if (!$this->securityContext->isInitialized() && !$this->securityContext->canBeInitialized()) {
-            $this->logger->debug(sprintf('OpenID Connect Client: (%s) Cannot send JWT cookie because the security context could not be initialized.', get_class($this)));
+            $this->logger->debug(sprintf('OpenID Connect: (%s) Cannot send JWT cookie because the security context could not be initialized.', get_class($this)));
             return;
         }
         if (!$this->isOpenIdConnectAuthentication()) {
@@ -49,14 +49,14 @@ final class SetJwtCookieComponent implements ComponentInterface
         }
         $account = $this->securityContext->getAccountByAuthenticationProviderName($this->options['authenticationProviderName']);
         if ($account === null) {
-            $this->logger->info(sprintf('OpenID Connect Client: (%s) No Flow account found for %s, removing JWT cookie.', get_class($this), $this->options['authenticationProviderName']));
+            $this->logger->info(sprintf('OpenID Connect: (%s) No Flow account found for %s, removing JWT cookie.', get_class($this), $this->options['authenticationProviderName']));
             $this->removeJwtCookie($componentContext);
             return;
         }
 
         $identityToken = $account->getCredentialsSource();
         if (!$identityToken instanceof IdentityToken) {
-            $this->logger->error(sprintf('OpenID Connect Client: (%s) No identity token found in credentials source of account %s - could not set JWT cookie.', get_class($this), $account->getAccountIdentifier()));
+            $this->logger->error(sprintf('OpenID Connect: (%s) No identity token found in credentials source of account %s - could not set JWT cookie.', get_class($this), $account->getAccountIdentifier()));
             return;
         }
 

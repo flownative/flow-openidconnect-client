@@ -140,26 +140,28 @@ final class OpenIdConnectClient
     }
 
     /**
-     * @param string $serviceName
-     * @param Uri $returnToUri
-     * @param array $scopes Additional scopes, "openid" will automatically be requested
-     * @return Uri|null
+     * Start authorization via OAuth, using an OpenID Connect scope
+     *
+     * @param string $serviceName The service name used in the OAuth configuration
+     * @param Uri $returnToUri The desired return URI
+     * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
+     * @return Uri The rendered URI to redirect to
      * @throws OAuthClientException
      */
-    public function authenticate(string $serviceName, Uri $returnToUri, array $scopes): ?Uri
+    public function startAuthorization(string $serviceName, Uri $returnToUri, string $scope): Uri
     {
         $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $serviceName]);
         if (strpos($returnArguments, 'ERROR') === 0) {
             throw new \RuntimeException(substr($returnArguments, 6));
         }
         $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
-        $scopes = array_unique(array_merge($scopes, ['openid']));
+        $scope = implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid'])));
 
-        return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $scopes);
+        return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $scope);
     }
 
     /**
-     * Returns the current oAuth token, if any
+     * Returns the current OAuth token, if any
      *
      * @param string $authorizationIdentifier
      * @return Authorization|null
@@ -183,15 +185,15 @@ final class OpenIdConnectClient
      * @throws ConnectionException
      * @throws ServiceException
      */
-    public function getIdentityToken(string $authorizationIdentifier): ?IdentityToken
+    public function getIdentityToken(string $authorizationIdentifier): IdentityToken
     {
         $authorization = $this->getAuthorization($authorizationIdentifier);
         if (!$authorization instanceof Authorization) {
-            return null;
+            throw new ServiceException(sprintf('OpenID Connect client: Authorization %s was not found', $authorizationIdentifier), 1567853403);
         }
         $accessToken = $authorization->getAccessToken();
         if (!$accessToken) {
-            return null;
+            throw new ServiceException(sprintf('OpenID Connect client: Authorization %s contained no access token', $authorizationIdentifier), 1567853441);
         }
         $tokenValues = $accessToken->getValues();
         if (!isset($tokenValues['id_token'])) {
@@ -249,7 +251,7 @@ final class OpenIdConnectClient
                 throw new ConnectionException(sprintf('OpenID Connect: Discovery endpoint returned invalid response.'), 1554903349);
             }
             $this->discoveryCache->set('options', $discoveredOptions);
-            $this->logger->info(sprintf('OpenID Connect client: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri));
+            $this->logger->info(sprintf('OpenID Connect: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri));
         }
 
         foreach ($discoveredOptions as $optionName => $optionValue) {

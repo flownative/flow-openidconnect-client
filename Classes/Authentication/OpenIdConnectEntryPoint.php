@@ -28,17 +28,14 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
     public function startAuthentication(Request $request, Response $response): void
     {
         $this->validateOptions();
-
         $this->logger->debug(sprintf('OpenID Connect: OpenIdConnectEntryPoint starting authentication for service "%s" ...', $this->options['serviceName']));
 
         $client = new OpenIdConnectClient($this->options['serviceName']);
         try {
-            $providerUri = $client->authenticate($this->options['serviceName'], $request->getUri(), $this->options['scopes'] ?? []);
-            if ($providerUri === null) {
-                throw new ConfigurationException(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" could not determine a provider URI for redirect', $this->options['serviceName']), 1566899138);
-            }
+            $providerUri = $client->startAuthorization($this->options['serviceName'], $request->getUri(), $this->options['scope'] ?? '');
         } catch (OAuthClientException | ServiceException $exception) {
             $this->logger->error(sprintf('OpenID Connect: Authentication for service "%s" failed: %s', $this->options['serviceName'], $exception->getMessage()));
+            return;
         }
 
         $this->logger->info(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" redirecting to %s', $this->options['serviceName'], $providerUri));
@@ -55,8 +52,8 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         if (!isset($this->options['serviceName'])) {
             throw new ConfigurationException('OpenID Connect: "serviceName" option was not configured for OpenIdConnectEntryPoint', 1559898606);
         }
-        if (isset($this->options['scopes']) && !is_array($this->options['scopes'])) {
-            throw new ConfigurationException('OpenID Connect: "scopes" option was not configured correctly for OpenIdConnectEntryPoint', 1560259102);
+        if (isset($this->options['scope']) && !is_string($this->options['scope'])) {
+            throw new ConfigurationException('OpenID Connect: "scope" option was not configured correctly for OpenIdConnectEntryPoint', 1560259102);
         }
     }
 }

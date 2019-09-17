@@ -39,4 +39,4 @@ Flownative:
 #            entryPoint: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectEntryPoint'
 #            entryPointOptions:
 #              serviceName: 'acmeservice'
-#              scopes: ['inum', 'user_name', 'sap_custno']
+#              scope: 'inum user_name sap_custno'
