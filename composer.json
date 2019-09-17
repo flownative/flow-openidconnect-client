@@ -15,7 +15,7 @@
     "email": "support@flownative.com"
   },
   "require": {
-    "neos/flow": "^4.0 || ^5.0 || dev-master",
+    "neos/flow": "^4.0 || ^5.0 ",
     "guzzlehttp/guzzle": "6.3.*",
     "flownative/oauth2-client": "dev-master",
     "phpseclib/phpseclib": "^2.0",
