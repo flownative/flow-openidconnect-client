@@ -1,8 +1,7 @@
 <?php
 namespace Flownative\OpenIdConnect\Client\Command;
 
-use Doctrine\Common\Persistence\ObjectManager as DoctrineObjectManager;
-use Doctrine\ORM\EntityManager as DoctrineEntityManager;
+use Doctrine\ORM\EntityManagerInterface as DoctrineEntityManagerInterface;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
 use Neos\Flow\Annotations as Flow;
@@ -11,7 +10,7 @@ use Neos\Flow\Cli\CommandController;
 final class OidcCommandController extends CommandController
 {
     /**
-     * @var DoctrineEntityManager
+     * @var DoctrineEntityManagerInterface
      */
     protected $entityManager;
 
@@ -22,10 +21,10 @@ final class OidcCommandController extends CommandController
     protected $settings;
 
     /**
-     * @param DoctrineObjectManager $entityManager
+     * @param DoctrineEntityManagerInterface $entityManager
      * @return void
      */
-    public function injectEntityManager(DoctrineObjectManager $entityManager): void
+    public function injectEntityManager(DoctrineEntityManagerInterface $entityManager): void
     {
         $this->entityManager = $entityManager;
     }
