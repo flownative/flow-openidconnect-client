@@ -17,7 +17,7 @@
   "require": {
     "neos/flow": "~4.3.18 || ~5.0.17 || ~5.1.11 || ~5.2.7 || ~5.3.3",
     "guzzlehttp/guzzle": "6.3.*",
-    "flownative/oauth2-client": "dev-master",
+    "flownative/oauth2-client": "0.2.*",
     "phpseclib/phpseclib": "^2.0",
     "lcobucci/jwt": "^3.3"
   },
