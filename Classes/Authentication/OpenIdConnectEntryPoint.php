@@ -7,25 +7,27 @@ use Flownative\OpenIdConnect\Client\ConfigurationException;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Annotations as Flow;
-use Neos\Flow\Http\Request;
-use Neos\Flow\Http\Response;
-use Neos\Flow\Log\PsrSystemLoggerInterface;
+use Neos\Flow\Http\ContentStream;
 use Neos\Flow\Security\Authentication\EntryPoint\AbstractEntryPoint;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectEntryPoint extends AbstractEntryPoint
 {
     /**
      * @Flow\Inject
-     * @var PsrSystemLoggerInterface
+     * @var LoggerInterface
      */
     protected $logger;
 
     /**
-     * @param Request $request
-     * @param Response $response
+     * @param ServerRequestInterface $request
+     * @param ResponseInterface $response
+     * @return ResponseInterface
      * @throws ConfigurationException
      */
-    public function startAuthentication(Request $request, Response $response): void
+    public function startAuthentication(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
     {
         $this->validateOptions();
         $this->logger->debug(sprintf('OpenID Connect: OpenIdConnectEntryPoint starting authentication for service "%s" ...', $this->options['serviceName']));
@@ -35,13 +37,13 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
             $providerUri = $client->startAuthorization($this->options['serviceName'], $request->getUri(), $this->options['scope'] ?? '');
         } catch (OAuthClientException | ServiceException $exception) {
             $this->logger->error(sprintf('OpenID Connect: Authentication for service "%s" failed: %s', $this->options['serviceName'], $exception->getMessage()));
-            return;
+            return $response;
         }
 
         $this->logger->info(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" redirecting to %s', $this->options['serviceName'], $providerUri));
-        $response->setContent(sprintf('<html lang="en"><head><meta http-equiv="refresh" content="0;url=%s"/><title>OpenID Connect</title></head></html>', htmlentities((string)$providerUri, ENT_QUOTES, 'utf-8')));
-        $response->setStatus(303);
-        $response->setHeader('Location', (string)$providerUri);
+
+        $body = ContentStream::fromContents(sprintf('<html lang="en"><head><meta http-equiv="refresh" content="0;url=%s"/><title>OpenID Connect</title></head></html>', htmlentities((string)$providerUri, ENT_QUOTES, 'utf-8')));
+        return $response->withBody($body)->withStatus(303)->withHeader('Location', (string)$providerUri);
     }
 
     /**

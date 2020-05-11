@@ -13,9 +13,9 @@ use GuzzleHttp\Exception\GuzzleException;
 use Neos\Cache\Exception as CacheException;
 use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\Annotations as Flow;
-use Neos\Flow\Http\Uri;
-use Neos\Flow\Log\PsrSystemLoggerInterface;
 use Neos\Utility\Arrays;
+use Psr\Http\Message\UriInterface;
+use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectClient
 {
@@ -55,7 +55,7 @@ final class OpenIdConnectClient
 
     /**
      * @Flow\Inject
-     * @var PsrSystemLoggerInterface
+     * @var LoggerInterface
      */
     protected $logger;
 
@@ -143,12 +143,12 @@ final class OpenIdConnectClient
      * Start authorization via OAuth, using an OpenID Connect scope
      *
      * @param string $serviceName The service name used in the OAuth configuration
-     * @param Uri $returnToUri The desired return URI
+     * @param UriInterface $returnToUri The desired return URI
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
-     * @return Uri The rendered URI to redirect to
+     * @return UriInterface The rendered URI to redirect to
      * @throws OAuthClientException
      */
-    public function startAuthorization(string $serviceName, Uri $returnToUri, string $scope): Uri
+    public function startAuthorization(string $serviceName, UriInterface $returnToUri, string $scope): UriInterface
     {
         $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $serviceName]);
         if (strpos($returnArguments, 'ERROR') === 0) {
