@@ -85,6 +85,7 @@ final class OpenIdConnectProvider extends AbstractProvider
             if (!$identityToken->hasValidSignature($jwks)) {
                 throw new SecurityException(sprintf('Open ID Connect: The identity token provided by the OIDC provider had an invalid signature'), 1561479176);
             }
+            $this->logger->debug(sprintf('OpenID Connect: Successfully verified signature of identity token with %s value "%s"', $this->options['accountIdentifierTokenValueName'], $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? 'unknown'));
         } catch (SecurityException $exception) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
             $this->logger->notice(sprintf('OpenID Connect: The authentication provider caught an exception: %s', $exception->getMessage()));
@@ -105,7 +106,7 @@ final class OpenIdConnectProvider extends AbstractProvider
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
-        $this->logger->debug(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s.', $account->getAccountIdentifier(), $account->getAuthenticationProviderName()));
+        $this->logger->info(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Scope: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), $identityToken->values['scope'] ?? '-'));
 
         $this->emitAuthenticated($authenticationToken, $identityToken, $this->policyService->getRoles());
     }

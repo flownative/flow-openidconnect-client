@@ -70,7 +70,7 @@ class IdentityToken
         }
 
         // The JOSE Header (JSON Object Signing and Encryption), see: https://tools.ietf.org/html/rfc7515
-        $identityToken->header = json_decode(self::base64UrlDecode($parts[0]), true);
+        $identityToken->header = json_decode(self::base64UrlDecode($parts[0]), true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($identityToken->header)) {
             throw new \InvalidArgumentException('Failed decoding JOSE header from JWT.', 1559207497);
         }
@@ -81,7 +81,7 @@ class IdentityToken
         // The JWT payload, including header, sans signature
         $identityToken->payload = implode('.', $parts);
 
-        $identityTokenArray = json_decode(self::base64UrlDecode($parts[1]), true);
+        $identityTokenArray = json_decode(self::base64UrlDecode($parts[1]), true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($identityTokenArray)) {
             throw new \InvalidArgumentException('Failed decoding identity token from JWT.', 1559208043);
         }
@@ -122,10 +122,6 @@ class IdentityToken
                     $this->signature
                 );
             break;
-//            case 'HS256':
-//            case 'HS512':
-//            case 'HS384':
-//            break;
             default:
                 throw new ServiceException(sprintf('Unsupported JWT signature type %s.', $this->header['alg']), 1559213623);
         }
@@ -139,6 +135,18 @@ class IdentityToken
     public function isExpiredAt(\DateTimeInterface $now): bool
     {
         return $this->parsedJwt->isExpired($now);
+    }
+
+    /**
+     * Checks if the identity token's "scope" value contains the given identifier
+     *
+     * @param string $scopeIdentifier
+     * @return bool
+     */
+    public function scopeContains(string $scopeIdentifier): bool
+    {
+        $scopeIdentifiers = \Neos\Utility\Arrays::trimExplode(',', $this->values['scope'] ?? '');
+        return in_array($scopeIdentifier, $scopeIdentifiers, true);
     }
 
     /**

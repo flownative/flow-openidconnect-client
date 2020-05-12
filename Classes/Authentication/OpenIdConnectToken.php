@@ -1,5 +1,5 @@
 <?php
-declare(strict_types = 1);
+declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Flownative\OAuth2\Client\OAuthClient;
@@ -33,6 +33,11 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     protected $cookies = [];
 
     /**
+     * @var string
+     */
+    protected $authorizationHeader;
+
+    /**
      * @param ActionRequest $actionRequest
      * @throws InvalidAuthenticationStatusException
      */
@@ -43,6 +48,16 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
         $this->queryParameters = $httpRequest->getQueryParams();
         $this->cookies = $httpRequest->getCookieParams();
+
+        if ($httpRequest->hasHeader('Authorization')) {
+            $this->authorizationHeader = $httpRequest->getHeader('Authorization');
+        } elseif ($httpRequest->hasHeader('authorization')) {
+            $this->authorizationHeader = $httpRequest->getHeader('Authorization');
+        }
+
+        if (is_array($this->authorizationHeader)) {
+            $this->authorizationHeader = reset($this->authorizationHeader);
+        }
     }
 
     /**
@@ -57,7 +72,10 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
      */
     public function extractIdentityTokenFromRequest(string $cookieName): IdentityToken
     {
-        if (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
+        if ($this->authorizationHeader !== null) {
+            $identityToken = $this->extractIdentityTokenFromAuthorizationHeader($this->authorizationHeader);
+
+        } elseif (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
             if (!isset($this->queryParameters[OAuthClient::AUTHORIZATION_ID_QUERY_PARAMETER_NAME])) {
                 throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', OAuthClient::AUTHORIZATION_ID_QUERY_PARAMETER_NAME), 1560350311);
             }
@@ -81,6 +99,28 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
         }
 
         // NOTE: This token is not verified yet – signature and expiration time must be checked by code using this token
+        return $identityToken;
+    }
+
+    /**
+     * @param string $authorizationHeader
+     * @return IdentityToken
+     * @throws AccessDeniedException | AuthenticationRequiredException | InvalidAuthenticationStatusException
+     */
+    private function extractIdentityTokenFromAuthorizationHeader(string $authorizationHeader): IdentityToken
+    {
+        if (strpos($this->authorizationHeader, 'Bearer ') !== 0) {
+            $this->setAuthenticationStatus(TokenInterface::NO_CREDENTIALS_GIVEN);
+            throw new AuthenticationRequiredException('Could not extract access token from Authorization header: "Bearer" keyword is missing', 1589283608);
+        }
+
+        try {
+            $jwt = substr($this->authorizationHeader, strlen('Bearer '));
+            $identityToken = IdentityToken::fromJwt($jwt);
+        } catch (\InvalidArgumentException $exception) {
+            $this->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
+            throw new AccessDeniedException('Could not extract JWT from Authorization header', 1589283968, $exception);
+        }
         return $identityToken;
     }
 
