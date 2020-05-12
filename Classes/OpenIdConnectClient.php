@@ -12,7 +12,6 @@ use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
 use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
 use League\OAuth2\Client\Token\AccessToken;
-use League\OAuth2\Client\Token\AccessTokenInterface;
 use Neos\Cache\Exception as CacheException;
 use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\Annotations as Flow;
@@ -154,21 +153,26 @@ final class OpenIdConnectClient
      * @param string $clientSecret Client Secret
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
      * @param string $grantType One of the Authorization::GRANT_* constants
+     * @param array $additionalParameters Additional parameters to provide in the request body while requesting the token. For example ['audience' => 'https://www.example.com/api/v1']
      * @return AccessToken
+     * @throws AuthenticationException
      * @throws ConnectionException
      * @throws IdentityProviderException
-     * @throws AuthenticationException
      */
-    public function getAccessToken(string $serviceName, string $clientId, string $clientSecret, string $scope, $grantType = Authorization::GRANT_CLIENT_CREDENTIALS): AccessToken
+    public function getAccessToken(string $serviceName, string $clientId, string $clientSecret, string $scope, string $grantType, array $additionalParameters = []): AccessToken
     {
-        $scope = implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid'])));
+        $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid']))));
 
         $authorizationId = Authorization::calculateAuthorizationId($serviceName, $clientId, $scope, $grantType);
         $authorization = $this->getAuthorization($authorizationId);
 
         if ($authorization === null) {
-            $this->oAuthClient->requestAccessToken($serviceName, $clientId, $clientSecret, $scope, $grantType);
+            $this->logger->info(sprintf('OpenID Connect: Requesting new access token for service %s / client id %s / scope %s', $serviceName, $clientId, $scope));
+
+            $this->oAuthClient->requestAccessToken($serviceName, $clientId, $clientSecret, $scope, $grantType, $additionalParameters);
             $authorization = $this->getAuthorization($authorizationId);
+        } else {
+            $this->logger->info(sprintf('OpenID Connect: Using existing access token for service %s / client id %s / scope %s', $serviceName, $clientId, $scope));
         }
 
         if ($authorization === null) {
@@ -201,7 +205,7 @@ final class OpenIdConnectClient
             throw new \RuntimeException(substr($returnArguments, 6));
         }
         $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
-        $scope = implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid'])));
+        $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid']))));
 
         return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $scope);
     }
