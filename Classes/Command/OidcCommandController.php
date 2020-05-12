@@ -1,16 +1,21 @@
 <?php
 namespace Flownative\OpenIdConnect\Client\Command;
 
-use Doctrine\ORM\EntityManagerInterface as DoctrineEntityManagerInterface;
+use Doctrine\ORM\EntityManagerInterface;
+use Flownative\OAuth2\Client\Authorization;
+use Flownative\OpenIdConnect\Client\AuthenticationException;
+use Flownative\OpenIdConnect\Client\ConnectionException;
+use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
+use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Cli\CommandController;
 
 final class OidcCommandController extends CommandController
 {
     /**
-     * @var DoctrineEntityManagerInterface
+     * @var EntityManagerInterface
      */
     protected $entityManager;
 
@@ -21,10 +26,10 @@ final class OidcCommandController extends CommandController
     protected $settings;
 
     /**
-     * @param DoctrineEntityManagerInterface $entityManager
+     * @param EntityManagerInterface $entityManager
      * @return void
      */
-    public function injectEntityManager(DoctrineEntityManagerInterface $entityManager): void
+    public function injectEntityManager(EntityManagerInterface $entityManager): void
     {
         $this->entityManager = $entityManager;
     }
@@ -70,5 +75,30 @@ final class OidcCommandController extends CommandController
         }
 
         $this->output->outputTable($rows, ['Option', 'Value']);
+    }
+
+    /**
+     * @param string $serviceName
+     */
+    public function getAccessTokenCommand(string $serviceName): void
+    {
+        $openIdConnectClient = new OpenIdConnectClient($serviceName);
+
+        $additionalParameters = $this->settings['services'][$serviceName]['options']['additionalParameters'] ?? [];
+        try {
+            $accessToken = $openIdConnectClient->getAccessToken(
+                $serviceName,
+                $this->settings['services'][$serviceName]['options']['clientId'],
+                $this->settings['services'][$serviceName]['options']['clientSecret'],
+                'profile,name',
+                Authorization::GRANT_CLIENT_CREDENTIALS,
+                $additionalParameters
+            );
+        } catch (\Exception $e) {
+            $this->outputLine('<error>%s</error>', [$e->getMessage()]);
+            exit (1);
+        }
+
+        $this->outputLine($accessToken->getToken());
     }
 }
