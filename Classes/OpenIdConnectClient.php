@@ -10,6 +10,9 @@ use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
+use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
+use League\OAuth2\Client\Token\AccessToken;
+use League\OAuth2\Client\Token\AccessTokenInterface;
 use Neos\Cache\Exception as CacheException;
 use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\Annotations as Flow;
@@ -140,7 +143,50 @@ final class OpenIdConnectClient
     }
 
     /**
-     * Start authorization via OAuth, using an OpenID Connect scope
+     * Requests an access token via OAuth, using an OpenID Connect scope
+     *
+     * This method is usually used using the OAuth Client Credentials Flow for machine-to-machine applications.
+     * Therefore the grant type is usually Authorization::GRANT_CLIENT_CREDENTIALS. You need to specify the
+     * client identifier and client secret and may optionally specify a scope.
+     *
+     * @param string $serviceName The service name used in the OAuth configuration
+     * @param string $clientId Client ID
+     * @param string $clientSecret Client Secret
+     * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
+     * @param string $grantType One of the Authorization::GRANT_* constants
+     * @return AccessToken
+     * @throws ConnectionException
+     * @throws IdentityProviderException
+     * @throws AuthenticationException
+     */
+    public function getAccessToken(string $serviceName, string $clientId, string $clientSecret, string $scope, $grantType = Authorization::GRANT_CLIENT_CREDENTIALS): AccessToken
+    {
+        $scope = implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid'])));
+
+        $authorizationId = Authorization::calculateAuthorizationId($serviceName, $clientId, $scope, $grantType);
+        $authorization = $this->getAuthorization($authorizationId);
+
+        if ($authorization === null) {
+            $this->oAuthClient->requestAccessToken($serviceName, $clientId, $clientSecret, $scope, $grantType);
+            $authorization = $this->getAuthorization($authorizationId);
+        }
+
+        if ($authorization === null) {
+            throw new ConnectionException(sprintf('OpenID Connect client: Failed retrieving access token for service "%s", clientId "%s": No authorization found for id %s', $serviceName, $clientId, $authorizationId));
+        }
+
+        $accessToken = $authorization->getAccessToken();
+        if ($accessToken === null) {
+            throw new AuthenticationException(sprintf('OpenID Connect client: Failed retrieving access token for service "%s", clientId "%s": Authorization %s contains no token', $serviceName, $clientId, $authorizationId));
+        }
+
+        return $accessToken;
+    }
+
+    /**
+     * Start authorization via OAuth, with the Authorization Code Flow, using an OpenID Connect scope
+     *
+     * This method is an interactive authorization, which usually requires a browser to work.
      *
      * @param string $serviceName The service name used in the OAuth configuration
      * @param UriInterface $returnToUri The desired return URI
