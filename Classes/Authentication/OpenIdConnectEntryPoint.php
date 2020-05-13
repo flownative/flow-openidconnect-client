@@ -32,6 +32,10 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         $this->validateOptions();
         $this->logger->debug(sprintf('OpenID Connect: OpenIdConnectEntryPoint starting authentication for service "%s" ...', $this->options['serviceName']));
 
+        if ($this->hasAuthorizationHeader($request)) {
+            $this->logger->debug('OpenID Connect: OpenIdConnectEntryPoint detected "Authorization" header');
+        }
+
         $client = new OpenIdConnectClient($this->options['serviceName']);
         try {
             $providerUri = $client->startAuthorization($this->options['serviceName'], $request->getUri(), $this->options['scope'] ?? '');
@@ -57,5 +61,24 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         if (isset($this->options['scope']) && !is_string($this->options['scope'])) {
             throw new ConfigurationException('OpenID Connect: "scope" option was not configured correctly for OpenIdConnectEntryPoint', 1560259102);
         }
+    }
+
+    /**
+     * @param ServerRequestInterface $request
+     * @return bool
+     */
+    private function hasAuthorizationHeader(ServerRequestInterface $request): bool
+    {
+        $authorizationHeader = null;
+        if ($request->hasHeader('Authorization')) {
+            $authorizationHeader = $request->getHeader('Authorization');
+        } elseif ($request->hasHeader('authorization')) {
+            $authorizationHeader = $request->getHeader('Authorization');
+        }
+
+        if (is_array($authorizationHeader)) {
+            $authorizationHeader = reset($this->authorizationHeader);
+        }
+        return $authorizationHeader !== null;
     }
 }
