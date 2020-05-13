@@ -110,13 +110,13 @@ final class OpenIdConnectClient
     protected function initializeObject(): void
     {
         if (!isset($this->settings['services'][$this->serviceName])) {
-            throw new ConfigurationException(sprintf('OpenID Connect client: No configuration found for service "%s".', $this->serviceName), 1554914085);
+            throw new ConfigurationException(sprintf('OpenID Connect Client: No configuration found for service "%s".', $this->serviceName), 1554914085);
         }
         if (!isset($this->settings['services'][$this->serviceName]['options'])) {
-            throw new ConfigurationException(sprintf('OpenID Connect client: Missing options in configuration for service "%s".', $this->serviceName), 1554914112);
+            throw new ConfigurationException(sprintf('OpenID Connect Client: Missing options in configuration for service "%s".', $this->serviceName), 1554914112);
         }
         if (!is_array($this->settings['services'][$this->serviceName]['options'])) {
-            throw new ConfigurationException(sprintf('OpenID Connect client: Invalid configuration for service "%s", options must be an array.', $this->serviceName), 1554914157);
+            throw new ConfigurationException(sprintf('OpenID Connect Client: Invalid configuration for service "%s", options must be an array.', $this->serviceName), 1554914157);
         }
         $this->options = Arrays::arrayMergeRecursiveOverrule(self::DEFAULT_OPTIONS, $this->settings['services'][$this->serviceName]['options']);
         if (isset($this->options['discoveryUri'])) {
@@ -125,7 +125,7 @@ final class OpenIdConnectClient
 
         foreach (['clientId', 'clientSecret', 'authorizationEndpoint', 'tokenEndpoint', 'jwksUri'] as $optionName) {
             if (empty($this->options[$optionName])) {
-                throw new ConfigurationException(sprintf('OpenID Connect client: Required option "%s" is not configured for service "%s".', $optionName, $this->serviceName), 1554968498);
+                throw new ConfigurationException(sprintf('OpenID Connect Client: Required option "%s" is not configured for service "%s".', $optionName, $this->serviceName), 1554968498);
             }
         }
 
@@ -163,25 +163,36 @@ final class OpenIdConnectClient
     {
         $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid']))));
 
+        $accessToken = null;
         $authorizationId = Authorization::calculateAuthorizationId($serviceName, $clientId, $scope, $grantType);
         $authorization = $this->getAuthorization($authorizationId);
 
-        if ($authorization === null) {
-            $this->logger->info(sprintf('OpenID Connect: Requesting new access token for service %s / client id %s / scope %s', $serviceName, $clientId, $scope));
+        if ($authorization !== null) {
+            $accessToken = $authorization->getAccessToken();
+            if ($accessToken === null) {
+                $this->logger->warning(sprintf('OpenID Connect Client: Authorization %s for service "%s", clientId "%s" contained no token', $authorizationId, $serviceName, $clientId));
+            } elseif ($accessToken->hasExpired()) {
+                $this->logger->info(sprintf('OpenID Connect Client: Access token contained in authorization %s for service "%s", clientId "%s" has expired', $authorizationId, $serviceName, $clientId));
+            }
+        }
+
+        if ($accessToken === null || $accessToken->hasExpired()) {
+            $this->logger->info(sprintf('OpenID Connect Client: Requesting new access token for service %s using client id %s %s', $serviceName, $clientId, ($scope ? 'requesting scope "' . $scope . '"' : 'requesting no scope')));
 
             $this->oAuthClient->requestAccessToken($serviceName, $clientId, $clientSecret, $scope, $grantType, $additionalParameters);
             $authorization = $this->getAuthorization($authorizationId);
+            if ($authorization === null) {
+                throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving access token for service "%s", clientId "%s": No authorization found for id %s', $serviceName, $clientId, $authorizationId));
+            }
+
+            $accessToken = $authorization->getAccessToken();
+            if ($accessToken === null) {
+                throw new AuthenticationException(sprintf('OpenID Connect Client: Failed retrieving access token for service "%s", clientId "%s": Authorization %s contains no token', $serviceName, $clientId, $authorizationId));
+            }
+
         } else {
-            $this->logger->info(sprintf('OpenID Connect: Using existing access token for service %s / client id %s / scope %s', $serviceName, $clientId, $scope));
-        }
-
-        if ($authorization === null) {
-            throw new ConnectionException(sprintf('OpenID Connect client: Failed retrieving access token for service "%s", clientId "%s": No authorization found for id %s', $serviceName, $clientId, $authorizationId));
-        }
-
-        $accessToken = $authorization->getAccessToken();
-        if ($accessToken === null) {
-            throw new AuthenticationException(sprintf('OpenID Connect client: Failed retrieving access token for service "%s", clientId "%s": Authorization %s contains no token', $serviceName, $clientId, $authorizationId));
+            $expiresInSeconds = $accessToken->getExpires() - time();
+            $this->logger->info(sprintf('OpenID Connect Client: Using existing access token for service %s using client id %s %s. Remaining lifetime: %d seconds', $serviceName, $clientId, ($scope ? 'with scope "' . $scope . '"' : 'without a scope'), $expiresInSeconds));
         }
 
         return $accessToken;
@@ -222,7 +233,7 @@ final class OpenIdConnectClient
         try {
             $authorization = $this->oAuthClient->getAuthorization($authorizationIdentifier);
         } catch (ORMException | OptimisticLockException $exception) {
-            throw new ConnectionException(sprintf('OpenID Connect client: Failed retrieving oAuth token %s: %s', $authorizationIdentifier, $exception->getMessage()), 1559202394);
+            throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving oAuth token %s: %s', $authorizationIdentifier, $exception->getMessage()), 1559202394);
         }
         return $authorization;
     }
@@ -239,15 +250,15 @@ final class OpenIdConnectClient
     {
         $authorization = $this->getAuthorization($authorizationIdentifier);
         if (!$authorization instanceof Authorization) {
-            throw new ServiceException(sprintf('OpenID Connect client: Authorization %s was not found', $authorizationIdentifier), 1567853403);
+            throw new ServiceException(sprintf('OpenID Connect Client: Authorization %s was not found', $authorizationIdentifier), 1567853403);
         }
         $accessToken = $authorization->getAccessToken();
         if (!$accessToken) {
-            throw new ServiceException(sprintf('OpenID Connect client: Authorization %s contained no access token', $authorizationIdentifier), 1567853441);
+            throw new ServiceException(sprintf('OpenID Connect Client: Authorization %s contained no access token', $authorizationIdentifier), 1567853441);
         }
         $tokenValues = $accessToken->getValues();
         if (!isset($tokenValues['id_token'])) {
-            throw new ServiceException('OpenID Connect client: No id_token found in values of current oAuth token', 1559208674);
+            throw new ServiceException('OpenID Connect Client: No id_token found in values of current oAuth token', 1559208674);
         }
         return IdentityToken::fromJwt($tokenValues['id_token']);
     }
@@ -270,12 +281,12 @@ final class OpenIdConnectClient
         try {
             $response = $httpClient->request('GET', $this->options['jwksUri']);
         } catch (GuzzleException $e) {
-            throw new ConnectionException(sprintf('OpenID Connect: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
+            throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
         }
 
         $response = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
         if (!is_array($response) || !isset($response['keys'])) {
-            throw new ServiceException(sprintf('OpenID Connect: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
+            throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
         }
         $this->jwks = $response['keys'];
         return $this->jwks;
@@ -294,14 +305,14 @@ final class OpenIdConnectClient
                 $httpClient = new HttpClient();
                 $response = $httpClient->request('GET', $discoveryUri);
             } catch (GuzzleException $e) {
-                throw new ConnectionException(sprintf('OpenID Connect: Failed discovering options at %s: %s', $discoveryUri, $e->getMessage()), 1554902567);
+                throw new ConnectionException(sprintf('OpenID Connect Client: Failed discovering options at %s: %s', $discoveryUri, $e->getMessage()), 1554902567);
             }
             $discoveredOptions = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
             if (!is_array($discoveredOptions)) {
-                throw new ConnectionException(sprintf('OpenID Connect: Discovery endpoint returned invalid response.'), 1554903349);
+                throw new ConnectionException(sprintf('OpenID Connect Client: Discovery endpoint returned invalid response.'), 1554903349);
             }
             $this->discoveryCache->set('options', $discoveredOptions);
-            $this->logger->info(sprintf('OpenID Connect: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri));
+            $this->logger->info(sprintf('OpenID Connect Client: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri));
         }
 
         foreach ($discoveredOptions as $optionName => $optionValue) {
