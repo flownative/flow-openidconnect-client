@@ -6,8 +6,6 @@
 
 This [Flow](https://flow.neos.io) package provides an [OpenID Connect](https://openid.net/connect/) client SDK.
 
-Note: this package is at an early stage, breaking changes may be released without further warning ...
-
 ## Configuration
 
     Flownative:
@@ -53,6 +51,38 @@ Note: this package is at an early stage, breaking changes may be released withou
                 entryPointOptions:
                   serviceName: 'acmeservice'
                   scopes: ['inum', 'user_name', 'sap_custno']
+
+### Roles from Identity Token
+
+Instead of specifying the Flow authentication roles directly, the
+provider can extract the roles from the identity token values. The roles
+provided by the token must have the same identifier which is used in
+Flow's policy configuration.
+
+Given that the indentity token provides a claim called
+"https://flownative.com/roles", you may configure the provider as
+follows:
+
+```
+…
+        security:
+          authentication:
+            providers:
+              'Flownative.OpenIdConnect.Client:OidcProvider':
+                label: 'OpenID Connect'
+                provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
+                providerOptions:
+                  rolesFromClaim: 'https://flownative.com/roles'
+                  …
+ 
+```
+
+When a user logs in and her identity token has a value
+"https://flownative.com/roles" containing an array of Flow role
+identifiers, the OpenID Connect provider will automatically assign these
+roles to the transient account.
+
+Check logs for hints if things are not working as expected.
 
 ## Authentication Flow
 

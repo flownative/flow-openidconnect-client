@@ -67,8 +67,8 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (!$authenticationToken instanceof OpenIdConnectToken) {
             throw new UnsupportedAuthenticationTokenException(sprintf('The OpenID Connect authentication provider cannot authenticate the given token of type %s.', get_class($authenticationToken)), 1559805996);
         }
-        if (!isset($this->options['roles'])) {
-            throw new \RuntimeException(sprintf('Missing "roles" option in the configuration of OpenID Connect authentication provider'), 1559806095);
+        if (!isset($this->options['roles']) && !isset($this->options['rolesFromClaim'])) {
+            throw new \RuntimeException(sprintf('Either "roles" or "rolesFromClaim" must be specified in the configuration of OpenID Connect authentication provider'), 1559806095);
         }
         if (!isset($this->options['serviceName'])) {
             throw new \RuntimeException(sprintf('Missing "serviceName" option in the configuration of OpenID Connect authentication provider'), 1561480057);
@@ -102,11 +102,13 @@ final class OpenIdConnectProvider extends AbstractProvider
             throw new AuthenticationException(sprintf('Open ID Connect: The identity token provided by the OIDC provider contained no "%s" value, which is needed as an account identifier', $this->options['accountIdentifierTokenValueName']), 1560267246);
         }
 
-        $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $this->options['roles'], $identityToken->asJwt());
+        $roleIdentifiers = $this->getConfiguredRoles($identityToken);
+
+        $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $roleIdentifiers, $identityToken->asJwt());
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
-        $this->logger->info(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Scope: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), $identityToken->values['scope'] ?? '-'));
+        $this->logger->info(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Roles: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), implode(', ', $this->getConfiguredRoles($identityToken))));
 
         $this->emitAuthenticated($authenticationToken, $identityToken, $this->policyService->getRoles());
     }
@@ -118,7 +120,9 @@ final class OpenIdConnectProvider extends AbstractProvider
      * @return void
      * @Flow\Signal()
      */
-    public function emitAuthenticated(TokenInterface $authenticationToken, IdentityToken $identityToken, array $roles): void {}
+    public function emitAuthenticated(TokenInterface $authenticationToken, IdentityToken $identityToken, array $roles): void
+    {
+    }
 
     /**
      * @param string $accountIdentifier
@@ -137,5 +141,35 @@ final class OpenIdConnectProvider extends AbstractProvider
         $account->setAuthenticationProviderName($this->name);
         $account->setCredentialsSource(IdentityToken::fromJwt($jwt));
         return $account;
+    }
+
+    /**
+     * @param IdentityToken $identityToken
+     * @return array
+     */
+    private function getConfiguredRoles(IdentityToken $identityToken): array
+    {
+        if (isset($this->options['roles'])) {
+            return $this->options['roles'];
+        }
+
+        if (!isset($identityToken->values[$this->options['rolesFromClaim']])) {
+            $this->logger->warning(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because it contained no value "%s", which was confiured as "rolesFromClaim".', $identityToken->values['sub'] ?? '', $this->options['rolesFromClaim']));
+            return [];
+        }
+        if (!is_array($identityToken->values[$this->options['rolesFromClaim']])) {
+            $this->logger->error(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because the value "%s" was not an array as expected.', $identityToken->values['sub'] ?? '', $this->options['rolesFromClaim']));
+            return [];
+        }
+
+        $roles = $identityToken->values[$this->options['rolesFromClaim']];
+        foreach ($roles as $i => $role) {
+            if (!$this->policyService->hasRole($role)) {
+                unset($roles[$i]);
+                $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $role,$identityToken->values['sub'] ?? ''));
+            }
+        }
+
+        return $roles;
     }
 }
