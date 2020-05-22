@@ -72,7 +72,8 @@ follows:
                 label: 'OpenID Connect'
                 provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
                 providerOptions:
-                  rolesFromClaim: 'https://flownative.com/roles'
+                  rolesFromClaims:
+                    - 'https://flownative.com/roles'
                   …
  
 ```
@@ -81,6 +82,9 @@ When a user logs in and her identity token has a value
 "https://flownative.com/roles" containing an array of Flow role
 identifiers, the OpenID Connect provider will automatically assign these
 roles to the transient account.
+
+You may specify multiple claim names which are all considered for
+compiling a list of roles.
 
 Check logs for hints if things are not working as expected.
 

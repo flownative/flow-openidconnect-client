@@ -67,8 +67,8 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (!$authenticationToken instanceof OpenIdConnectToken) {
             throw new UnsupportedAuthenticationTokenException(sprintf('The OpenID Connect authentication provider cannot authenticate the given token of type %s.', get_class($authenticationToken)), 1559805996);
         }
-        if (!isset($this->options['roles']) && !isset($this->options['rolesFromClaim'])) {
-            throw new \RuntimeException(sprintf('Either "roles" or "rolesFromClaim" must be specified in the configuration of OpenID Connect authentication provider'), 1559806095);
+        if (!isset($this->options['roles']) && !isset($this->options['rolesFromClaims'])) {
+            throw new \RuntimeException(sprintf('Either "roles" or "rolesFromClaims" must be specified in the configuration of OpenID Connect authentication provider'), 1559806095);
         }
         if (!isset($this->options['serviceName'])) {
             throw new \RuntimeException(sprintf('Missing "serviceName" option in the configuration of OpenID Connect authentication provider'), 1561480057);
@@ -153,23 +153,28 @@ final class OpenIdConnectProvider extends AbstractProvider
             return $this->options['roles'];
         }
 
-        if (!isset($identityToken->values[$this->options['rolesFromClaim']])) {
-            $this->logger->warning(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because it contained no value "%s", which was confiured as "rolesFromClaim".', $identityToken->values['sub'] ?? '', $this->options['rolesFromClaim']));
-            return [];
-        }
-        if (!is_array($identityToken->values[$this->options['rolesFromClaim']])) {
-            $this->logger->error(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because the value "%s" was not an array as expected.', $identityToken->values['sub'] ?? '', $this->options['rolesFromClaim']));
-            return [];
-        }
+        $roleIdentifiers = [];
 
-        $roles = $identityToken->values[$this->options['rolesFromClaim']];
-        foreach ($roles as $i => $role) {
-            if (!$this->policyService->hasRole($role)) {
-                unset($roles[$i]);
-                $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $role,$identityToken->values['sub'] ?? ''));
+        foreach ($this->options['rolesFromClaims'] as $claim) {
+            if (!isset($identityToken->values[$claim])) {
+                $this->logger->debug(sprintf('OpenID Connect: getConfiguredRoles() Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim));
+                continue;
             }
+            if (!is_array($identityToken->values[$claim])) {
+                $this->logger->error(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because the claim "%s" was not an array as expected.', $identityToken->values['sub'] ?? '', $claim));
+                continue;
+            }
+
+            foreach ($identityToken->values[$claim] as $i => $roleIdentifier) {
+                if ($this->policyService->hasRole($roleIdentifier)) {
+                    $roleIdentifiers[] = $roleIdentifier;
+                } else {
+                    $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''));
+                }
+            }
+
         }
 
-        return $roles;
+        return array_unique($roleIdentifiers);
     }
 }
