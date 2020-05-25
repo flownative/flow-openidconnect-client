@@ -77,7 +77,7 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         }
 
         if (is_array($authorizationHeader)) {
-            $authorizationHeader = reset($this->authorizationHeader);
+            $authorizationHeader = reset($authorizationHeader);
         }
         return $authorizationHeader !== null;
     }
