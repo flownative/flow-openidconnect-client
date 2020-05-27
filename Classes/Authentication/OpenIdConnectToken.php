@@ -127,7 +127,8 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     /**
      * @param string $cookieName
      * @return IdentityToken
-     * @throws AccessDeniedException | AuthenticationRequiredException | InvalidAuthenticationStatusException
+     * @throws AuthenticationRequiredException
+     * @throws InvalidAuthenticationStatusException
      */
     private function extractIdentityTokenFromCookie(string $cookieName): IdentityToken
     {
@@ -140,7 +141,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
             $identityToken = IdentityToken::fromJwt($jwt);
         } catch (\InvalidArgumentException $exception) {
             $this->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
-            throw new AccessDeniedException(sprintf('Could not extract JWT from cookie "%s"', $cookieName), 1560349541, $exception);
+            throw new AuthenticationRequiredException(sprintf('Could not extract JWT from cookie "%s"', $cookieName), 1560349541, $exception);
         }
         return $identityToken;
     }
