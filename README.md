@@ -26,8 +26,10 @@ This [Flow](https://flow.neos.io) package provides an [OpenID Connect](https://o
               chain:
                 'Flownative.OpenIdConnect.Client:setJwtCookie':
                   componentOptions:
-                    cookieName: 'your-own-cookie-name-jwt'
-                    secureCookie: false
+                    cookie:
+                      name: 'your-own-cookie-name-jwt'
+                      secure: true
+                      sameSite: 'Strict'
 
         security:
           authentication:
