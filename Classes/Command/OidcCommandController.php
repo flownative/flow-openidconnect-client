@@ -90,7 +90,7 @@ final class OidcCommandController extends CommandController
                 $serviceName,
                 $this->settings['services'][$serviceName]['options']['clientId'],
                 $this->settings['services'][$serviceName]['options']['clientSecret'],
-                'profile,name',
+                'profile name',
                 Authorization::GRANT_CLIENT_CREDENTIALS,
                 $additionalParameters
             );
