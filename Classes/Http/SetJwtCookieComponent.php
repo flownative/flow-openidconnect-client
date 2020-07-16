@@ -8,6 +8,7 @@ use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\Component\ComponentContext;
 use Neos\Flow\Http\Component\ComponentInterface;
 use Neos\Flow\Http\Cookie;
+use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Context as SecurityContext;
 use Psr\Log\LoggerInterface;
 
@@ -44,11 +45,11 @@ final class SetJwtCookieComponent implements ComponentInterface
     public function initializeObject()
     {
         if (isset($this->options['cookieName'])) {
-            $this->logger->warning(sprintf('OpenID Connect: (%s) Option "cookieName" was used - please use "cookie.name" instead.', get_class($this)));
+            $this->logger->warning('OpenID Connect: Option "cookieName" was used - please use "cookie.name" instead.', LogEnvironment::fromMethodName(__METHOD__));
             $this->options['cookie']['name'] = $this->options['cookieName'];
         }
         if (isset($this->options['secureCookie'])) {
-            $this->logger->warning(sprintf('OpenID Connect: (%s) Option "secureCookie" was used - please use "cookie.secure" instead.', get_class($this)));
+            $this->logger->warning('OpenID Connect: Option "secureCookie" was used - please use "cookie.secure" instead.', LogEnvironment::fromMethodName(__METHOD__));
             $this->options['cookie']['secure'] = $this->options['secureCookie'];
         }
     }
@@ -59,7 +60,7 @@ final class SetJwtCookieComponent implements ComponentInterface
     public function handle(ComponentContext $componentContext): void
     {
         if (!$this->securityContext->isInitialized() && !$this->securityContext->canBeInitialized()) {
-            $this->logger->debug(sprintf('OpenID Connect: (%s) Cannot send JWT cookie because the security context could not be initialized.', get_class($this)));
+            $this->logger->debug('OpenID Connect: Cannot send JWT cookie because the security context could not be initialized.', LogEnvironment::fromMethodName(__METHOD__));
             return;
         }
         if (!$this->isOpenIdConnectAuthentication()) {
@@ -67,14 +68,14 @@ final class SetJwtCookieComponent implements ComponentInterface
         }
         $account = $this->securityContext->getAccountByAuthenticationProviderName($this->options['authenticationProviderName']);
         if ($account === null) {
-            $this->logger->debug(sprintf('OpenID Connect: (%s) No account is authenticated using the provider %s, removing JWT cookie "%s" if it exists.', get_class($this), $this->options['authenticationProviderName'], $this->options['cookie']['name']));
+            $this->logger->debug(sprintf('OpenID Connect: No account is authenticated using the provider %s, removing JWT cookie "%s" if it exists.', $this->options['authenticationProviderName'], $this->options['cookie']['name']), LogEnvironment::fromMethodName(__METHOD__));
             $this->removeJwtCookie($componentContext);
             return;
         }
 
         $identityToken = $account->getCredentialsSource();
         if (!$identityToken instanceof IdentityToken) {
-            $this->logger->error(sprintf('OpenID Connect: (%s) No identity token found in credentials source of account %s - could not set JWT cookie.', get_class($this), $account->getAccountIdentifier()));
+            $this->logger->error(sprintf('OpenID Connect: No identity token found in credentials source of account %s - could not set JWT cookie.', $account->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
             return;
         }
 

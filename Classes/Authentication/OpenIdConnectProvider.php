@@ -9,6 +9,7 @@ use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Log\PsrSystemLoggerInterface;
+use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\Authentication\Provider\AbstractProvider;
 use Neos\Flow\Security\Authentication\TokenInterface;
@@ -85,7 +86,7 @@ final class OpenIdConnectProvider extends AbstractProvider
             if (!$identityToken->hasValidSignature($jwks)) {
                 throw new SecurityException(sprintf('Open ID Connect: The identity token provided by the OIDC provider had an invalid signature'), 1561479176);
             }
-            $this->logger->debug(sprintf('OpenID Connect: Successfully verified signature of identity token with %s value "%s"', $this->options['accountIdentifierTokenValueName'], $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? 'unknown'));
+            $this->logger->debug(sprintf('OpenID Connect: Successfully verified signature of identity token with %s value "%s"', $this->options['accountIdentifierTokenValueName'], $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? 'unknown'), LogEnvironment::fromMethodName(__METHOD__));
         } catch (SecurityException\AuthenticationRequiredException $exception) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
             return;
@@ -93,13 +94,13 @@ final class OpenIdConnectProvider extends AbstractProvider
             if ($authenticationToken->getAuthenticationStatus() === TokenInterface::AUTHENTICATION_SUCCESSFUL) {
                 $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
             }
-            $this->logger->notice(sprintf('OpenID Connect: The authentication provider caught an exception: %s', $exception->getMessage()));
+            $this->logger->notice(sprintf('OpenID Connect: The authentication provider caught an exception: %s', $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return;
         }
 
         if ($identityToken->isExpiredAt(new \DateTimeImmutable())) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
-            $this->logger->info(sprintf('OpenID Connect: The JWT token "%s" is expired, need to re-authenticate', $identityToken->values[$this->options['accountIdentifierTokenValueName']]));
+            $this->logger->info(sprintf('OpenID Connect: The JWT token "%s" is expired, need to re-authenticate', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
             return;
         }
 
@@ -113,7 +114,7 @@ final class OpenIdConnectProvider extends AbstractProvider
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
-        $this->logger->info(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Roles: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), implode(', ', $this->getConfiguredRoles($identityToken))));
+        $this->logger->info(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Roles: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), implode(', ', $this->getConfiguredRoles($identityToken))), LogEnvironment::fromMethodName(__METHOD__));
 
         $this->emitAuthenticated($authenticationToken, $identityToken, $this->policyService->getRoles());
     }
@@ -162,11 +163,11 @@ final class OpenIdConnectProvider extends AbstractProvider
 
         foreach ($this->options['rolesFromClaims'] as $claim) {
             if (!isset($identityToken->values[$claim])) {
-                $this->logger->debug(sprintf('OpenID Connect: getConfiguredRoles() Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim));
+                $this->logger->debug(sprintf('OpenID Connect: getConfiguredRoles() Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
                 continue;
             }
             if (!is_array($identityToken->values[$claim])) {
-                $this->logger->error(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because the claim "%s" was not an array as expected.', $identityToken->values['sub'] ?? '', $claim));
+                $this->logger->error(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because the claim "%s" was not an array as expected.', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
                 continue;
             }
 
@@ -174,7 +175,7 @@ final class OpenIdConnectProvider extends AbstractProvider
                 if ($this->policyService->hasRole($roleIdentifier)) {
                     $roleIdentifiers[] = $roleIdentifier;
                 } else {
-                    $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''));
+                    $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
                 }
             }
 
