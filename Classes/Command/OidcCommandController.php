@@ -90,10 +90,13 @@ final class OidcCommandController extends CommandController
                 $serviceName,
                 $this->settings['services'][$serviceName]['options']['clientId'],
                 $this->settings['services'][$serviceName]['options']['clientSecret'],
-                'profile,name',
+                'profile name',
                 Authorization::GRANT_CLIENT_CREDENTIALS,
                 $additionalParameters
             );
+        } catch (IdentityProviderException $e) {
+            $this->outputLine('<error>%s: "%s"</error>', [$e->getMessage(), $e->getResponseBody()['error_description'] ?? '']);
+            exit (1);
         } catch (\Exception $e) {
             $this->outputLine('<error>%s</error>', [$e->getMessage()]);
             exit (1);
