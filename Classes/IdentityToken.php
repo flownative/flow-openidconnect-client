@@ -60,7 +60,7 @@ class IdentityToken
 
         $parts = explode('.', $jwt);
         if (count($parts) !== 3) {
-            throw new \InvalidArgumentException('The given JWT does not have exactly 3 parts (header, payload, signature), which is currently not supported bythis implementation.', 1559208004);
+            throw new \InvalidArgumentException('The given JWT does not have exactly 3 parts (header, payload, signature), which is currently not supported by this implementation.', 1559208004);
         }
 
         // The JSON Web Signature (JWS), see https://tools.ietf.org/html/rfc7515
