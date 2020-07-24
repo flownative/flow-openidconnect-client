@@ -3,8 +3,6 @@ namespace Flownative\OpenIdConnect\Client\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Flownative\OAuth2\Client\Authorization;
-use Flownative\OpenIdConnect\Client\AuthenticationException;
-use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;

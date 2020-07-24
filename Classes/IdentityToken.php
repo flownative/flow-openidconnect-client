@@ -60,18 +60,20 @@ class IdentityToken
 
         $parts = explode('.', $jwt);
         if (count($parts) !== 3) {
-            throw new \InvalidArgumentException('The given JWT does not have exactly 3 parts (header, payload, signature), which is currently not supported by this implementation.', 1559208004);
+            throw new \InvalidArgumentException('The given JWT does not have exactly 3 parts (header, payload, signature), which is currently not supported bythis implementation.', 1559208004);
         }
 
         // The JSON Web Signature (JWS), see https://tools.ietf.org/html/rfc7515
         $identityToken->signature = self::base64UrlDecode(array_pop($parts));
+        if (empty($identityToken->signature)) {
+            throw new \InvalidArgumentException('Failed decoding signature from JWT.', 1559207444);
+        }
 
         // The JOSE Header (JSON Object Signing and Encryption), see: https://tools.ietf.org/html/rfc7515
         $identityToken->header = json_decode(self::base64UrlDecode($parts[0]), true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($identityToken->header)) {
             throw new \InvalidArgumentException('Failed decoding JOSE header from JWT.', 1559207497);
         }
-
         if (!isset($identityToken->header['alg'])) {
             throw new \InvalidArgumentException('Missing signature algorithm in JOSE header from JWT.', 1559212231);
         }

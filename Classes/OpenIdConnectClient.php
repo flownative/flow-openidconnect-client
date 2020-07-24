@@ -15,6 +15,7 @@ use League\OAuth2\Client\Token\AccessToken;
 use Neos\Cache\Exception as CacheException;
 use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\Annotations as Flow;
+use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Utility\Arrays;
 use Psr\Http\Message\UriInterface;
 use Psr\Log\LoggerInterface;
@@ -170,14 +171,14 @@ final class OpenIdConnectClient
         if ($authorization !== null) {
             $accessToken = $authorization->getAccessToken();
             if ($accessToken === null) {
-                $this->logger->warning(sprintf('OpenID Connect Client: Authorization %s for service "%s", clientId "%s" contained no token', $authorizationId, $serviceName, $clientId));
+                $this->logger->warning(sprintf('OpenID Connect Client: Authorization %s for service "%s", clientId "%s" contained no token', $authorizationId, $serviceName, $clientId), LogEnvironment::fromMethodName(__METHOD__));
             } elseif ($accessToken->hasExpired()) {
-                $this->logger->info(sprintf('OpenID Connect Client: Access token contained in authorization %s for service "%s", clientId "%s" has expired', $authorizationId, $serviceName, $clientId));
+                $this->logger->info(sprintf('OpenID Connect Client: Access token contained in authorization %s for service "%s", clientId "%s" has expired', $authorizationId, $serviceName, $clientId), LogEnvironment::fromMethodName(__METHOD__));
             }
         }
 
         if ($accessToken === null || $accessToken->hasExpired()) {
-            $this->logger->info(sprintf('OpenID Connect Client: Requesting new access token for service %s using client id %s %s', $serviceName, $clientId, ($scope ? 'requesting scope "' . $scope . '"' : 'requesting no scope')));
+            $this->logger->info(sprintf('OpenID Connect Client: Requesting new access token for service %s using client id %s %s', $serviceName, $clientId, ($scope ? 'requesting scope "' . $scope . '"' : 'requesting no scope')), LogEnvironment::fromMethodName(__METHOD__));
 
             $this->oAuthClient->requestAccessToken($serviceName, $clientId, $clientSecret, $scope, $grantType, $additionalParameters);
             $authorization = $this->getAuthorization($authorizationId);
@@ -192,7 +193,7 @@ final class OpenIdConnectClient
 
         } else {
             $expiresInSeconds = $accessToken->getExpires() - time();
-            $this->logger->info(sprintf('OpenID Connect Client: Using existing access token for service %s using client id %s %s. Remaining lifetime: %d seconds', $serviceName, $clientId, ($scope ? 'with scope "' . $scope . '"' : 'without a scope'), $expiresInSeconds));
+            $this->logger->info(sprintf('OpenID Connect Client: Using existing access token for service %s using client id %s %s. Remaining lifetime: %d seconds', $serviceName, $clientId, ($scope ? 'with scope "' . $scope . '"' : 'without a scope'), $expiresInSeconds), LogEnvironment::fromMethodName(__METHOD__));
         }
 
         return $accessToken;
@@ -312,7 +313,7 @@ final class OpenIdConnectClient
                 throw new ConnectionException(sprintf('OpenID Connect Client: Discovery endpoint returned invalid response.'), 1554903349);
             }
             $this->discoveryCache->set('options', $discoveredOptions);
-            $this->logger->info(sprintf('OpenID Connect Client: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri));
+            $this->logger->info(sprintf('OpenID Connect Client: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri), LogEnvironment::fromMethodName(__METHOD__));
         }
 
         foreach ($discoveredOptions as $optionName => $optionValue) {
