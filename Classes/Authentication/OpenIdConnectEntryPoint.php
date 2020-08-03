@@ -39,7 +39,7 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
 
         $client = new OpenIdConnectClient($this->options['serviceName']);
         try {
-            $providerUri = $client->startAuthorization($this->options['serviceName'], $request->getUri(), $this->options['scope'] ?? '');
+            $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '');
         } catch (OAuthClientException | ServiceException $exception) {
             $this->logger->error(sprintf('OpenID Connect: Authentication for service "%s" failed: %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return $response;

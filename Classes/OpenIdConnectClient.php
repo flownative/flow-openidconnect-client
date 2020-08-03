@@ -44,13 +44,6 @@ final class OpenIdConnectClient
     private $oAuthClient;
 
     /**
-     * The JSON Web Key Set to use for verifying JSON Web Tokens (JWT)
-     *
-     * @var array
-     */
-    private $jwks = [];
-
-    /**
      * @Flow\InjectConfiguration
      * @var array
      */
@@ -123,11 +116,8 @@ final class OpenIdConnectClient
         if (isset($this->options['discoveryUri'])) {
             $this->amendOptionsWithDiscovery($this->options['discoveryUri']);
         }
-
-        foreach (['clientId', 'clientSecret', 'authorizationEndpoint', 'tokenEndpoint', 'jwksUri'] as $optionName) {
-            if (empty($this->options[$optionName])) {
-                throw new ConfigurationException(sprintf('OpenID Connect Client: Required option "%s" is not configured for service "%s".', $optionName, $this->serviceName), 1554968498);
-            }
+        if (empty($this->options['jwksUri'])) {
+            throw new ConfigurationException(sprintf('OpenID Connect Client: Option "discoveryUri" or "jwksUri" has to be configured for service "%s".', $this->serviceName), 1554968498);
         }
 
         $this->oAuthClient = new OAuthClient($this->serviceName);
@@ -204,21 +194,23 @@ final class OpenIdConnectClient
      *
      * This method is an interactive authorization, which usually requires a browser to work.
      *
-     * @param string $serviceName The service name used in the OAuth configuration
      * @param UriInterface $returnToUri The desired return URI
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
      * @return UriInterface The rendered URI to redirect to
      * @throws OAuthClientException
      */
-    public function startAuthorization(string $serviceName, UriInterface $returnToUri, string $scope): UriInterface
+    public function startAuthorization(UriInterface $returnToUri, string $scope): UriInterface
     {
-        $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $serviceName]);
+        $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $this->serviceName]);
         if (strpos($returnArguments, 'ERROR') === 0) {
             throw new \RuntimeException(substr($returnArguments, 6));
         }
         $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
         $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid']))));
 
+        if (empty($this->options['clientId']) || empty($this->options['clientSecret'])) {
+            throw new \RuntimeException(sprintf('Authorization requires "clientId" and "clientSecret" to be configured for service "%s".', $this->serviceName), 1596456168);
+        }
         return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $scope);
     }
 
@@ -274,23 +266,24 @@ final class OpenIdConnectClient
      */
     public function getJwks(): array
     {
-        if (count($this->jwks)) {
-            return $this->jwks;
-        }
+        $cacheIdentifier = md5('jwks:' . $this->options['jwksUri']);
+        $jwks = $this->discoveryCache->get($cacheIdentifier);
+        if (empty($jwks)) {
+            $httpClient = new HttpClient();
+            try {
+                $response = $httpClient->request('GET', $this->options['jwksUri']);
+            } catch (GuzzleException $e) {
+                throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
+            }
 
-        $httpClient = new HttpClient();
-        try {
-            $response = $httpClient->request('GET', $this->options['jwksUri']);
-        } catch (GuzzleException $e) {
-            throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
+            $response = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
+            if (!is_array($response) || !isset($response['keys'])) {
+                throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
+            }
+            $jwks = $response['keys'];
+            $this->discoveryCache->set($cacheIdentifier, $jwks);
         }
-
-        $response = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
-        if (!is_array($response) || !isset($response['keys'])) {
-            throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
-        }
-        $this->jwks = $response['keys'];
-        return $this->jwks;
+        return $jwks;
     }
 
     /**
@@ -300,7 +293,8 @@ final class OpenIdConnectClient
      */
     private function amendOptionsWithDiscovery(string $discoveryUri): void
     {
-        $discoveredOptions = $this->discoveryCache->get('options');
+        $cacheIdentifier = md5('options:' . $discoveryUri);
+        $discoveredOptions = $this->discoveryCache->get($cacheIdentifier);
         if (empty($discoveredOptions)) {
             try {
                 $httpClient = new HttpClient();
@@ -312,7 +306,7 @@ final class OpenIdConnectClient
             if (!is_array($discoveredOptions)) {
                 throw new ConnectionException(sprintf('OpenID Connect Client: Discovery endpoint returned invalid response.'), 1554903349);
             }
-            $this->discoveryCache->set('options', $discoveredOptions);
+            $this->discoveryCache->set($cacheIdentifier, $discoveredOptions);
             $this->logger->info(sprintf('OpenID Connect Client: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri), LogEnvironment::fromMethodName(__METHOD__));
         }
 
