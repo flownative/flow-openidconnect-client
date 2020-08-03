@@ -50,7 +50,6 @@ final class OpenIdConnectClient
     protected $settings;
 
     /**
-     * @Flow\Inject
      * @var HttpClient
      */
     protected $httpClient;
@@ -103,6 +102,7 @@ final class OpenIdConnectClient
     public function __construct(string $serviceName)
     {
         $this->serviceName = $serviceName;
+        $this->httpClient = new HttpClient();
     }
 
     /**
