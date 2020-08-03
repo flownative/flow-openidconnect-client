@@ -7,6 +7,13 @@ Flownative\OpenIdConnect\Client\OpenIdConnectClient:
         arguments:
           1:
             value: Flownative_OpenIdConnect_Client_Discovery
+    jwksCache:
+      object:
+        factoryObjectName: Neos\Flow\Cache\CacheManager
+        factoryMethodName: getCache
+        arguments:
+          1:
+            value: Flownative_OpenIdConnect_Client_JWKs
 
 Flownative\OpenIdConnect\Client\OAuthClient:
   properties:
