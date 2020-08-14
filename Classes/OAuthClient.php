@@ -22,6 +22,8 @@ use Neos\Flow\Annotations as Flow;
  */
 class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
 {
+    public const SERVICE_TYPE= 'oidc';
+
     /**
      * @Flow\InjectConfiguration(path="http.baseUri", package="Neos.Flow")
      * @var string
@@ -105,7 +107,7 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
      */
     public function getServiceType(): string
     {
-        return 'oidc';
+        return self::SERVICE_TYPE;
     }
 
     /**
