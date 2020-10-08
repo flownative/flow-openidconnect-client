@@ -11,6 +11,7 @@ use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Log\PsrSystemLoggerInterface;
 use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Account;
+use Neos\Flow\Security\AccountRepository;
 use Neos\Flow\Security\Authentication\Provider\AbstractProvider;
 use Neos\Flow\Security\Authentication\TokenInterface;
 use Neos\Flow\Security\Context;
@@ -45,6 +46,12 @@ final class OpenIdConnectProvider extends AbstractProvider
      * @var array
      */
     protected $options = [];
+
+    /**
+     * @Flow\Inject
+     * @var AccountRepository
+     */
+    protected $accountRespository;
 
     /**
      * @return array
@@ -108,9 +115,11 @@ final class OpenIdConnectProvider extends AbstractProvider
             throw new AuthenticationException(sprintf('Open ID Connect: The identity token provided by the OIDC provider contained no "%s" value, which is needed as an account identifier', $this->options['accountIdentifierTokenValueName']), 1560267246);
         }
 
-        $roleIdentifiers = $this->getConfiguredRoles($identityToken);
+        $configuredRoleIdentifiers = $this->getConfiguredRoles($identityToken);
+        $roleIdentifiersFromExistingAccount = $this->getRoleIdentifiersFromExistingAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']]);
+        $effectiveRoleIdentifiers = array_unique(array_merge($configuredRoleIdentifiers, $roleIdentifiersFromExistingAccount));
 
-        $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $roleIdentifiers, $identityToken->asJwt());
+        $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $effectiveRoleIdentifiers, $identityToken->asJwt());
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
@@ -182,5 +191,24 @@ final class OpenIdConnectProvider extends AbstractProvider
         }
 
         return array_unique($roleIdentifiers);
+    }
+
+    /**
+     * @param string $accountIdentifier
+     * @return array
+     */
+    private function getRoleIdentifiersFromExistingAccount(string $accountIdentifier): array
+    {
+        $roleIdentifiers = [];
+        $existingAccount = $this->accountRespository->findActiveByAccountIdentifierAndAuthenticationProviderName($accountIdentifier, $this->name);
+
+        if ($existingAccount instanceof Account) {
+            foreach ($existingAccount->getRoles() as $role) {
+                /** @var Role $role */
+                $roleIdentifiers[] = $role->getIdentifier();
+            }
+        }
+
+        return $roleIdentifiers;
     }
 }
