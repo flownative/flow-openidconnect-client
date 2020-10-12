@@ -250,7 +250,11 @@ final class OpenIdConnectClient
         if (!isset($tokenValues['id_token'])) {
             throw new ServiceException('OpenID Connect Client: No id_token found in values of current oAuth token', 1559208674);
         }
-        return IdentityToken::fromJwt($tokenValues['id_token']);
+        try {
+            return IdentityToken::fromJwt($tokenValues['id_token']);
+        } catch (\JsonException $e) {
+            throw new ServiceException('OpenID Connect Client: Failed parsing identity token from JWT', 1602501992, $e);
+        }
     }
 
     /**
