@@ -114,7 +114,7 @@ final class OpenIdConnectProvider extends AbstractProvider
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
-        $this->logger->info(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Roles: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), implode(', ', $this->getConfiguredRoles($identityToken))), LogEnvironment::fromMethodName(__METHOD__));
+        $this->logger->debug(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Roles: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), implode(', ', $this->getConfiguredRoles($identityToken))), LogEnvironment::fromMethodName(__METHOD__));
 
         $this->emitAuthenticated($authenticationToken, $identityToken, $this->policyService->getRoles());
     }
