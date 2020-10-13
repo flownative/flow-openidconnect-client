@@ -17,12 +17,13 @@ use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use League\OAuth2\Client\Token\AccessToken;
-use League\OAuth2\Client\Token\AccessTokenInterface;
 use Neos\Cache\Backend\TransientMemoryBackend;
 use Neos\Cache\Frontend\VariableFrontend;
+use Neos\Flow\Utility\Algorithms;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\StreamInterface;
+use Psr\Log\LoggerInterface;
 use ReflectionException;
 
 class OpenIdConnectClientTest extends TestCase
@@ -78,10 +79,13 @@ class OpenIdConnectClientTest extends TestCase
 
         $this->oAuthClient = $this->createPartialMock(OAuthClient::class, ['getAuthorization']);
 
+        $logger = $this->createStub(LoggerInterface::class);
+
         $this->oidcClient = new OpenIdConnectClient('test');
         $this->inject($this->oidcClient, 'discoveryCache', $this->discoveryCache);
         $this->inject($this->oidcClient, 'jwksCache', $this->jwksCache);
         $this->inject($this->oidcClient, 'oAuthClient', $this->oAuthClient);
+        $this->inject($this->oidcClient, 'logger', $logger);
     }
 
     /**
@@ -180,15 +184,20 @@ class OpenIdConnectClientTest extends TestCase
         $scope = 'some openid';
         $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $clientSecret, $scope);
 
+        $expectedAccessToken = new AccessToken([
+            'access_token' => Algorithms::generateRandomToken(500),
+            'expires' => time() + 3600
+        ]);
 
         $authorization = new Authorization($authorizationId, $serviceName, $clientId, Authorization::GRANT_CLIENT_CREDENTIALS, $scope);
-        $authorization->setSerializedAccessToken('{"foo": "bar"}');
+        $authorization->setSerializedAccessToken(json_encode($expectedAccessToken, JSON_THROW_ON_ERROR, 512));
 
         $this->oAuthClient->method('getAuthorization')->with($authorizationId)->willReturn($authorization);
 
         $actualAccessToken = $this->oidcClient->getAccessToken($serviceName, $clientId, $clientSecret, $scope);
 
-        $this->assertSame($authorization->getAccessToken(), $actualAccessToken);
+        $this->assertSame($expectedAccessToken->getToken(), $actualAccessToken->getToken());
+        $this->assertSame($expectedAccessToken->getExpires(), $actualAccessToken->getExpires());
     }
 
     /**
