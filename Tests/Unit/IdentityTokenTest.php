@@ -11,6 +11,7 @@ namespace Flownative\OpenIdConnect\Client;
  * source code.
  */
 
+use JsonException;
 use PHPUnit\Framework\TestCase;
 
 class IdentityTokenTest extends TestCase
@@ -35,6 +36,7 @@ class IdentityTokenTest extends TestCase
      * @test
      * @dataProvider invalidJsonStrings
      * @param $json
+     * @throws JsonException
      */
     public function fromJsonRejectsInvalidJsonStrings(string $json, int $expectedExceptionCode): void
     {
@@ -49,6 +51,7 @@ class IdentityTokenTest extends TestCase
      * … (binary data of signature) …
      *
      * @test
+     * @throws JsonException
      */
     public function fromJsonSetsValuesCorrectly(): void
     {
@@ -62,6 +65,7 @@ class IdentityTokenTest extends TestCase
 
     /**
      * @test
+     * @throws JsonException
      */
     public function asJwtReturnsTokenAsString(): void
     {

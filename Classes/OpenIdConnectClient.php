@@ -144,29 +144,32 @@ final class OpenIdConnectClient
     }
 
     /**
-     * Requests an access token via OAuth, using an OpenID Connect scope
+     * Returns OAuth access token, using an OpenID Connect scope
      *
-     * This method is usually used using the OAuth Client Credentials Flow for machine-to-machine applications.
-     * Therefore the grant type is usually Authorization::GRANT_CLIENT_CREDENTIALS. You need to specify the
+     * This method is used using the OAuth Client Credentials Flow for machine-to-machine applications.
+     * Therefore the grant type must be Authorization::GRANT_CLIENT_CREDENTIALS. You need to specify the
      * client identifier and client secret and may optionally specify a scope.
+     *
+     * This method will check if an access token already exists (stored in an Authorization record), and
+     * if it doesn't, requests one via OAuth. The authorization id which leads to the Authorization record
+     * is deterministic and derived from the service name, client id, client secret and scope.
      *
      * @param string $serviceName The service name used in the OAuth configuration
      * @param string $clientId Client ID
      * @param string $clientSecret Client Secret
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
-     * @param string $grantType One of the Authorization::GRANT_* constants
      * @param array $additionalParameters Additional parameters to provide in the request body while requesting the token. For example ['audience' => 'https://www.example.com/api/v1']
      * @return AccessToken
      * @throws AuthenticationException
      * @throws ConnectionException
      * @throws IdentityProviderException
      */
-    public function getAccessToken(string $serviceName, string $clientId, string $clientSecret, string $scope, string $grantType, array $additionalParameters = []): AccessToken
+    public function getAccessToken(string $serviceName, string $clientId, string $clientSecret, string $scope, array $additionalParameters = []): AccessToken
     {
         $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid']))));
 
         $accessToken = null;
-        $authorizationId = Authorization::calculateAuthorizationId($serviceName, $clientId, $scope, $grantType);
+        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $clientSecret, $scope);
         $authorization = $this->getAuthorization($authorizationId);
 
         if ($authorization !== null) {
@@ -181,7 +184,7 @@ final class OpenIdConnectClient
         if ($accessToken === null || $accessToken->hasExpired()) {
             $this->logger->info(sprintf('OpenID Connect Client: Requesting new access token for service %s using client id %s %s', $serviceName, $clientId, ($scope ? 'requesting scope "' . $scope . '"' : 'requesting no scope')), LogEnvironment::fromMethodName(__METHOD__));
 
-            $this->oAuthClient->requestAccessToken($serviceName, $clientId, $clientSecret, $scope, $grantType, $additionalParameters);
+            $this->oAuthClient->requestAccessToken($serviceName, $clientId, $clientSecret, $scope, $additionalParameters);
             $authorization = $this->getAuthorization($authorizationId);
             if ($authorization === null) {
                 throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving access token for service "%s", clientId "%s": No authorization found for id %s', $serviceName, $clientId, $authorizationId));
@@ -226,23 +229,6 @@ final class OpenIdConnectClient
     }
 
     /**
-     * Returns the current OAuth token, if any
-     *
-     * @param string $authorizationIdentifier
-     * @return Authorization|null
-     * @throws ConnectionException
-     */
-    public function getAuthorization(string $authorizationIdentifier): ?Authorization
-    {
-        try {
-            $authorization = $this->oAuthClient->getAuthorization($authorizationIdentifier);
-        } catch (ORMException | OptimisticLockException $exception) {
-            throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving oAuth token %s: %s', $authorizationIdentifier, $exception->getMessage()), 1559202394);
-        }
-        return $authorization;
-    }
-
-    /**
      * Returns the current OpenId Connect Identity Token
      *
      * @param string $authorizationIdentifier
@@ -264,7 +250,11 @@ final class OpenIdConnectClient
         if (!isset($tokenValues['id_token'])) {
             throw new ServiceException('OpenID Connect Client: No id_token found in values of current oAuth token', 1559208674);
         }
-        return IdentityToken::fromJwt($tokenValues['id_token']);
+        try {
+            return IdentityToken::fromJwt($tokenValues['id_token']);
+        } catch (\JsonException $e) {
+            throw new ServiceException('OpenID Connect Client: Failed parsing identity token from JWT', 1602501992, $e);
+        }
     }
 
     /**
@@ -325,5 +315,22 @@ final class OpenIdConnectClient
                 $this->options[self::DISCOVERY_OPTIONS_MAPPING[$optionName]] = $optionValue;
             }
         }
+    }
+
+    /**
+     * Returns the specified authorization
+     *
+     * @param string $authorizationIdentifier
+     * @return Authorization|null
+     * @throws ConnectionException
+     */
+    private function getAuthorization(string $authorizationIdentifier): ?Authorization
+    {
+        try {
+            $authorization = $this->oAuthClient->getAuthorization($authorizationIdentifier);
+        } catch (ORMException | OptimisticLockException $exception) {
+            throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving oAuth token %s: %s', $authorizationIdentifier, $exception->getMessage()), 1559202394);
+        }
+        return $authorization;
     }
 }

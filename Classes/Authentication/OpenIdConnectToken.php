@@ -2,9 +2,9 @@
 declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
-use Flownative\OAuth2\Client\OAuthClient;
 use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
+use Flownative\OpenIdConnect\Client\OAuthClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Mvc\ActionRequest;
@@ -76,8 +76,9 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
             $identityToken = $this->extractIdentityTokenFromAuthorizationHeader($this->authorizationHeader);
 
         } elseif (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
-            if (!isset($this->queryParameters[OAuthClient::AUTHORIZATION_ID_QUERY_PARAMETER_NAME])) {
-                throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', OAuthClient::AUTHORIZATION_ID_QUERY_PARAMETER_NAME), 1560350311);
+            $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
+            if (!isset($this->queryParameters[$authorizationIdQueryParameterName])) {
+                throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', $authorizationIdQueryParameterName), 1560350311);
             }
             try {
                 $tokenArguments = TokenArguments::fromSignedString($this->queryParameters[self::OIDC_PARAMETER_NAME]);
@@ -86,7 +87,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
                 throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
             }
 
-            $authorizationIdentifier = $this->queryParameters[OAuthClient::AUTHORIZATION_ID_QUERY_PARAMETER_NAME];
+            $authorizationIdentifier = $this->queryParameters[$authorizationIdQueryParameterName];
             $client = new OpenIdConnectClient($tokenArguments[TokenArguments::SERVICE_NAME]);
 
             try {

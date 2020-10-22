@@ -11,14 +11,19 @@ namespace Flownative\OpenIdConnect\Client;
  * source code.
  */
 
+use Flownative\OAuth2\Client\Authorization;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
+use League\OAuth2\Client\Token\AccessToken;
 use Neos\Cache\Backend\TransientMemoryBackend;
 use Neos\Cache\Frontend\VariableFrontend;
+use Neos\Flow\Utility\Algorithms;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\StreamInterface;
+use Psr\Log\LoggerInterface;
 use ReflectionException;
 
 class OpenIdConnectClientTest extends TestCase
@@ -27,6 +32,11 @@ class OpenIdConnectClientTest extends TestCase
      * @var OpenIdConnectClient
      */
     protected $oidcClient;
+
+    /**
+     * @var OAuthClient | MockObject
+     */
+    protected $oAuthClient;
 
     /**
      * @var VariableFrontend
@@ -67,9 +77,15 @@ class OpenIdConnectClientTest extends TestCase
         $this->jwksCache = new VariableFrontend('jwks', new TransientMemoryBackend());
         $this->jwksCache->initializeObject();
 
+        $this->oAuthClient = $this->createPartialMock(OAuthClient::class, ['getAuthorization']);
+
+        $logger = $this->createStub(LoggerInterface::class);
+
         $this->oidcClient = new OpenIdConnectClient('test');
         $this->inject($this->oidcClient, 'discoveryCache', $this->discoveryCache);
         $this->inject($this->oidcClient, 'jwksCache', $this->jwksCache);
+        $this->inject($this->oidcClient, 'oAuthClient', $this->oAuthClient);
+        $this->inject($this->oidcClient, 'logger', $logger);
     }
 
     /**
@@ -156,6 +172,33 @@ class OpenIdConnectClientTest extends TestCase
         $this->assertSame($expectedJwks, $this->oidcClient->getJwks());
     }
 
+    /**
+     * @test
+     * @throws
+     */
+    public function getAccessTokenReturnsAccessTokenFromAuthorization(): void
+    {
+        $serviceName = 'test';
+        $clientId = 'the-client';
+        $clientSecret = 'the-secret';
+        $scope = 'some openid';
+        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $clientSecret, $scope);
+
+        $expectedAccessToken = new AccessToken([
+            'access_token' => Algorithms::generateRandomToken(500),
+            'expires' => time() + 3600
+        ]);
+
+        $authorization = new Authorization($authorizationId, $serviceName, $clientId, Authorization::GRANT_CLIENT_CREDENTIALS, $scope);
+        $authorization->setSerializedAccessToken(json_encode($expectedAccessToken, JSON_THROW_ON_ERROR, 512));
+
+        $this->oAuthClient->method('getAuthorization')->with($authorizationId)->willReturn($authorization);
+
+        $actualAccessToken = $this->oidcClient->getAccessToken($serviceName, $clientId, $clientSecret, $scope);
+
+        $this->assertSame($expectedAccessToken->getToken(), $actualAccessToken->getToken());
+        $this->assertSame($expectedAccessToken->getExpires(), $actualAccessToken->getExpires());
+    }
 
     /**
      * Injects $dependency into property $name of $target
