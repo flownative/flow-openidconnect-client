@@ -450,6 +450,44 @@ compiling a list of roles.
 
 Check logs for hints if things are not working as expected.
 
+## Roles from Existing Account
+
+As a third option, roles can be used from an existing account whose
+account identifier matches a given claim of the identity token. Or put
+differently: if there's an account with the same username which is
+provided by the identity token, roles of that (persisted) account can be
+used.
+
+Given that the identity token provides a claim called "email" and that
+an account (for example, a Neos user account) exists using an email
+address as its account identifier, you may configure the provider as
+follows:
+
+```
+…
+        security:
+          authentication:
+            providers:
+              'Flownative.OpenIdConnect.Client:OidcProvider':
+                label: 'OpenID Connect'
+                provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
+                providerOptions:
+                  accountIdentifierTokenValueName: 'email'
+                  addRolesFromExistingAccount: true
+                  …
+ 
+```
+
+When a user logs in and her identity token has a value "email"
+containing "alice@example.com", the OpenID Connect provider will
+automatically assign any roles which are assigned to a Flow account with
+the same account identifier.
+
+You may mix "rolesFromClaims" with "addRolesFromExistingAccount". In
+that case roles from claims and existing accounts will be merged.
+
+Again, check logs for hints if things are not working as expected.
+
 ## More about OpenID Connect
 
 See also:

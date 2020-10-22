@@ -1,6 +1,7 @@
 <?php
 namespace Flownative\OpenIdConnect\Client;
 
+use JsonException;
 use Lcobucci\JWT\Parser;
 use Lcobucci\JWT\Token;
 use phpseclib\Crypt\RSA;
@@ -70,7 +71,11 @@ class IdentityToken
         }
 
         // The JOSE Header (JSON Object Signing and Encryption), see: https://tools.ietf.org/html/rfc7515
-        $identityToken->header = json_decode(self::base64UrlDecode($parts[0]), true, 512, JSON_THROW_ON_ERROR);
+        try {
+            $identityToken->header = json_decode(self::base64UrlDecode($parts[0]), true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new \InvalidArgumentException('Failed decoding JOSE header from JWT.', 1603362934, $e);
+        }
         if (!is_array($identityToken->header)) {
             throw new \InvalidArgumentException('Failed decoding JOSE header from JWT.', 1559207497);
         }
@@ -81,7 +86,11 @@ class IdentityToken
         // The JWT payload, including header, sans signature
         $identityToken->payload = implode('.', $parts);
 
-        $identityTokenArray = json_decode(self::base64UrlDecode($parts[1]), true, 512, JSON_THROW_ON_ERROR);
+        try {
+            $identityTokenArray = json_decode(self::base64UrlDecode($parts[1]), true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new \InvalidArgumentException('Failed decoding identity token from JWT.', 1603362918, $e);
+        }
         if (!is_array($identityTokenArray)) {
             throw new \InvalidArgumentException('Failed decoding identity token from JWT.', 1559208043);
         }
