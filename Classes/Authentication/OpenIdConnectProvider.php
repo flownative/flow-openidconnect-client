@@ -21,6 +21,7 @@ use Neos\Flow\Security\Exception\NoSuchRoleException;
 use Neos\Flow\Security\Exception\UnsupportedAuthenticationTokenException;
 use Neos\Flow\Security\Policy\PolicyService;
 use Neos\Flow\Security\Policy\Role;
+use Neos\Cache\Exception as CacheException;
 
 final class OpenIdConnectProvider extends AbstractProvider
 {
@@ -51,7 +52,7 @@ final class OpenIdConnectProvider extends AbstractProvider
      * @Flow\Inject
      * @var AccountRepository
      */
-    protected $accountRespository;
+    protected $accountRepository;
 
     /**
      * @return array
@@ -69,14 +70,15 @@ final class OpenIdConnectProvider extends AbstractProvider
      * @throws NoSuchRoleException
      * @throws ServiceException
      * @throws UnsupportedAuthenticationTokenException
+     * @throws CacheException
      */
     public function authenticate(TokenInterface $authenticationToken): void
     {
         if (!$authenticationToken instanceof OpenIdConnectToken) {
             throw new UnsupportedAuthenticationTokenException(sprintf('The OpenID Connect authentication provider cannot authenticate the given token of type %s.', get_class($authenticationToken)), 1559805996);
         }
-        if (!isset($this->options['roles']) && !isset($this->options['rolesFromClaims'])) {
-            throw new \RuntimeException(sprintf('Either "roles" or "rolesFromClaims" must be specified in the configuration of OpenID Connect authentication provider'), 1559806095);
+        if (!isset($this->options['roles']) && !isset($this->options['rolesFromClaims']) && !isset($this->options['addRolesFromExistingAccount'])) {
+            throw new \RuntimeException(sprintf('Either "roles", "rolesFromClaims" or "addRolesFromExistingAccount" must be specified in the configuration of OpenID Connect authentication provider'), 1559806095);
         }
         if (!isset($this->options['serviceName'])) {
             throw new \RuntimeException(sprintf('Missing "serviceName" option in the configuration of OpenID Connect authentication provider'), 1561480057);
@@ -115,11 +117,9 @@ final class OpenIdConnectProvider extends AbstractProvider
             throw new AuthenticationException(sprintf('Open ID Connect: The identity token provided by the OIDC provider contained no "%s" value, which is needed as an account identifier', $this->options['accountIdentifierTokenValueName']), 1560267246);
         }
 
-        $configuredRoleIdentifiers = $this->getConfiguredRoles($identityToken);
-        $roleIdentifiersFromExistingAccount = $this->getRoleIdentifiersFromExistingAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']]);
-        $effectiveRoleIdentifiers = array_unique(array_merge($configuredRoleIdentifiers, $roleIdentifiersFromExistingAccount));
+        $roleIdentifiers = $this->getConfiguredRoles($identityToken);
 
-        $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $effectiveRoleIdentifiers, $identityToken->asJwt());
+        $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $roleIdentifiers, $identityToken->asJwt());
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
@@ -170,45 +170,46 @@ final class OpenIdConnectProvider extends AbstractProvider
 
         $roleIdentifiers = [];
 
-        foreach ($this->options['rolesFromClaims'] as $claim) {
-            if (!isset($identityToken->values[$claim])) {
-                $this->logger->debug(sprintf('OpenID Connect: getConfiguredRoles() Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
-                continue;
-            }
-            if (!is_array($identityToken->values[$claim])) {
-                $this->logger->error(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because the claim "%s" was not an array as expected.', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
-                continue;
-            }
+        if (isset($this->options['rolesFromClaims']) && is_array($this->options['rolesFromClaims'])) {
+            $claims = array_unique($this->options['rolesFromClaims']);
+            foreach ($claims as $claim) {
+                if (!isset($identityToken->values[$claim])) {
+                    $this->logger->debug(sprintf('OpenID Connect: getConfiguredRoles() Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
+                    continue;
+                }
+                if (!is_array($identityToken->values[$claim])) {
+                    $this->logger->error(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because the claim "%s" was not an array as expected.', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
+                    continue;
+                }
 
-            foreach ($identityToken->values[$claim] as $i => $roleIdentifier) {
-                if ($this->policyService->hasRole($roleIdentifier)) {
-                    $roleIdentifiers[] = $roleIdentifier;
+                foreach ($identityToken->values[$claim] as $i => $roleIdentifier) {
+                    if ($this->policyService->hasRole($roleIdentifier)) {
+                        $roleIdentifiers[] = $roleIdentifier;
+                    } else {
+                        $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
+                    }
+                }
+
+            }
+        }
+        if (isset($this->options['addRolesFromExistingAccount']) && $this->options['addRolesFromExistingAccount'] === true) {
+            $accountIdentifier = $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? null;
+            if ($accountIdentifier === null) {
+                $this->logger->error(sprintf('OpenID Connect: Failed using account identifier from from identity token (%s) because the configured claim "%s" does not exist.', $identityToken->values['sub'] ?? '', $this->options['accountIdentifierTokenValueName']), LogEnvironment::fromMethodName(__METHOD__));
+            } else {
+                $existingAccount = $this->accountRepository->findActiveByAccountIdentifierAndAuthenticationProviderName($accountIdentifier, $this->name);
+                if (!$existingAccount instanceof Account) {
+                    $this->logger->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account "%s" does not exist.', $identityToken->values['sub'] ?? '', $accountIdentifier), LogEnvironment::fromMethodName(__METHOD__));
                 } else {
-                    $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
+                    foreach ($existingAccount->getRoles() as $role) {
+                        /** @var Role $role */
+                        $roleIdentifiers[] = $role->getIdentifier();
+                    }
+                    $this->logger->debug(sprintf('OpenID Connect: getConfiguredRoles() Added roles (identity token %s) from existing account "%s"', $identityToken->values['sub'] ?? '', $existingAccount->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
                 }
             }
-
         }
 
         return array_unique($roleIdentifiers);
-    }
-
-    /**
-     * @param string $accountIdentifier
-     * @return array
-     */
-    private function getRoleIdentifiersFromExistingAccount(string $accountIdentifier): array
-    {
-        $roleIdentifiers = [];
-        $existingAccount = $this->accountRespository->findActiveByAccountIdentifierAndAuthenticationProviderName($accountIdentifier, $this->name);
-
-        if ($existingAccount instanceof Account) {
-            foreach ($existingAccount->getRoles() as $role) {
-                /** @var Role $role */
-                $roleIdentifiers[] = $role->getIdentifier();
-            }
-        }
-
-        return $roleIdentifiers;
     }
 }
