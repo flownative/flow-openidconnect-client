@@ -129,6 +129,14 @@ final class OpenIdConnectProvider extends AbstractProvider
     }
 
     /**
+     * @return string
+     */
+    public function getServiceName(): string
+    {
+        return $this->options['serviceName'] ?? '';
+    }
+
+    /**
      * @param TokenInterface $authenticationToken
      * @param IdentityToken $identityToken
      * @param Role[] $roles
@@ -199,7 +207,7 @@ final class OpenIdConnectProvider extends AbstractProvider
             } else {
                 $existingAccount = $this->accountRepository->findActiveByAccountIdentifierAndAuthenticationProviderName($accountIdentifier, $this->name);
                 if (!$existingAccount instanceof Account) {
-                    $this->logger->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account "%s" does not exist.', $identityToken->values['sub'] ?? '', $accountIdentifier), LogEnvironment::fromMethodName(__METHOD__));
+                    $this->logger->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account "%s" (provider: %s) does not exist.', $identityToken->values['sub'] ?? '', $accountIdentifier, $this->name), LogEnvironment::fromMethodName(__METHOD__));
                 } else {
                     foreach ($existingAccount->getRoles() as $role) {
                         /** @var Role $role */
