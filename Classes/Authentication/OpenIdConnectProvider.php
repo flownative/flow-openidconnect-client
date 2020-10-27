@@ -172,17 +172,18 @@ final class OpenIdConnectProvider extends AbstractProvider
      */
     private function getConfiguredRoles(IdentityToken $identityToken): array
     {
-        if (isset($this->options['roles'])) {
-            return $this->options['roles'];
-        }
-
         $roleIdentifiers = [];
+
+        if (isset($this->options['roles']) && is_array($this->options['roles'])) {
+            $roleIdentifiers = $this->options['roles'];
+            $this->logger->debug(sprintf('OpenID Connect: Adding the following fixed configured roles for identity token (%s): %s', $identityToken->values['sub'] ?? '', implode(', ', $roleIdentifiers)), LogEnvironment::fromMethodName(__METHOD__));
+        }
 
         if (isset($this->options['rolesFromClaims']) && is_array($this->options['rolesFromClaims'])) {
             $claims = array_unique($this->options['rolesFromClaims']);
             foreach ($claims as $claim) {
                 if (!isset($identityToken->values[$claim])) {
-                    $this->logger->debug(sprintf('OpenID Connect: getConfiguredRoles() Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
+                    $this->logger->debug(sprintf('OpenID Connect: Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
                     continue;
                 }
                 if (!is_array($identityToken->values[$claim])) {
@@ -213,7 +214,7 @@ final class OpenIdConnectProvider extends AbstractProvider
                         /** @var Role $role */
                         $roleIdentifiers[] = $role->getIdentifier();
                     }
-                    $this->logger->debug(sprintf('OpenID Connect: getConfiguredRoles() Added roles (identity token %s) from existing account "%s"', $identityToken->values['sub'] ?? '', $existingAccount->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
+                    $this->logger->debug(sprintf('OpenID Connect: Added roles (identity token %s) from existing account "%s"', $identityToken->values['sub'] ?? '', $existingAccount->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
                 }
             }
         }
