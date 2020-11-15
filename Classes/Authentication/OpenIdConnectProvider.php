@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Flownative\OpenIdConnect\Client\AuthenticationException;
@@ -8,7 +9,6 @@ use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Annotations as Flow;
-use Neos\Flow\Log\PsrSystemLoggerInterface;
 use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\AccountRepository;
@@ -22,6 +22,7 @@ use Neos\Flow\Security\Exception\UnsupportedAuthenticationTokenException;
 use Neos\Flow\Security\Policy\PolicyService;
 use Neos\Flow\Security\Policy\Role;
 use Neos\Cache\Exception as CacheException;
+use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectProvider extends AbstractProvider
 {
@@ -39,7 +40,7 @@ final class OpenIdConnectProvider extends AbstractProvider
 
     /**
      * @Flow\Inject
-     * @var PsrSystemLoggerInterface
+     * @var LoggerInterface
      */
     protected $logger;
 
