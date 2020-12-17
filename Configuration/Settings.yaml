@@ -16,7 +16,8 @@ Flownative:
 #          chain:
 #            'Flownative.OpenIdConnect.Client:setJwtCookie':
 #              componentOptions:
-#                cookieName: 'your-own-cookie-name-jwt'
+#                # Use the same service name as below - the corresponding JWT will be stored in a cookie named "<serviceName>-jwt"
+#                serviceName: 'exampleService'
 
 #    security:
 #      authentication:
@@ -27,7 +28,6 @@ Flownative:
 #            providerOptions:
 #              roles: ['Acme.MyPackage:User']
 #              accountIdentifierTokenValueName: 'inum'
-#              jwtCookieName: 'your-own-cookie-name-jwt'
 #              serviceName: 'exampleService'
 #            token: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken'
 #            requestPatterns:

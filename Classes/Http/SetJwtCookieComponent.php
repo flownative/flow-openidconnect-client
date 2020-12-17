@@ -10,6 +10,7 @@ use Neos\Flow\Http\Component\ComponentInterface;
 use Neos\Flow\Http\Cookie;
 use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Context as SecurityContext;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
 
 final class SetJwtCookieComponent implements ComponentInterface
@@ -59,6 +60,10 @@ final class SetJwtCookieComponent implements ComponentInterface
      */
     public function handle(ComponentContext $componentContext): void
     {
+        if ($this->isLogoutRequest($componentContext)) {
+            $this->handleLogout($componentContext);
+            return;
+        }
         if (!$this->securityContext->isInitialized() && !$this->securityContext->canBeInitialized()) {
             $this->logger->debug('OpenID Connect: Cannot send JWT cookie because the security context could not be initialized.', LogEnvironment::fromMethodName(__METHOD__));
             return;
@@ -70,6 +75,7 @@ final class SetJwtCookieComponent implements ComponentInterface
         if ($account === null) {
             $this->logger->debug(sprintf('OpenID Connect: No account is authenticated using the provider %s, removing JWT cookie "%s" if it exists.', $this->options['authenticationProviderName'], $this->options['cookie']['name']), LogEnvironment::fromMethodName(__METHOD__));
             $this->removeJwtCookie($componentContext);
+            $this->logger->info(sprintf('OpenID Connect Client: (%s) Logout requested (via query parameter) removing JWT cookie for service "%s".', get_class($this), $this->options['serviceName']));
             return;
         }
 
@@ -97,6 +103,31 @@ final class SetJwtCookieComponent implements ComponentInterface
 
     /**
      * @param ComponentContext $componentContext
+     * @return bool
+     */
+    private function isLogoutRequest(ComponentContext $componentContext): bool
+    {
+        $httpRequest = $componentContext->getHttpRequest();
+        if (!$httpRequest instanceof ServerRequestInterface) {
+            return false;
+        }
+        $queryParams = $httpRequest->getQueryParams();
+        return isset($queryParams['logout']) && $queryParams['logout'] === $this->options['serviceName'];
+    }
+
+    /**
+     * @param ComponentContext $componentContext
+     * @return void
+     */
+    private function handleLogout(ComponentContext $componentContext): void
+    {
+        $this->removeJwtCookie($componentContext);
+        $this->logger->info(sprintf('OpenID Connect Client: (%s) Logout requested (via query parameter) removing JWT cookie for service "%s".', get_class($this), $this->options['serviceName']));
+        $componentContext->replaceHttpResponse($componentContext->getHttpResponse()->withHeader('Location', (string)$componentContext->getHttpRequest()->getUri()->withQuery('')));
+    }
+
+    /**
+     * @param ComponentContext $componentContext
      * @param string $jwt
      */
     private function setJwtCookie(ComponentContext $componentContext, string $jwt): void
@@ -112,5 +143,10 @@ final class SetJwtCookieComponent implements ComponentInterface
     {
         $emptyJwtCookie = new Cookie($this->options['cookie']['name'], '', 1, null, null, '/', $this->options['cookie']['secure'], false, $this->options['cookie']['sameSite']);
         $componentContext->replaceHttpResponse($componentContext->getHttpResponse()->withAddedHeader('Set-Cookie', (string)$emptyJwtCookie));
+    }
+
+    private function jwtCookieName(): string
+    {
+        return $this->options['serviceName'] . '-jwt';
     }
 }
