@@ -1,33 +1,46 @@
 {
-  "name": "flownative/openidconnect-client",
-  "license": "MIT",
-  "type": "neos-package",
-  "description": "A generic Open ID Connect client base implementation for Flow Framework applications",
-  "authors": [
-    {
-      "name": "Robert Lemke",
-      "email": "robert@flownative.com",
-      "homepage": "https://www.flownative.com",
-      "role": "Developer"
+    "name": "flownative/openidconnect-client",
+    "license": "MIT",
+    "type": "neos-package",
+    "description": "An Open ID Connect (OIDC) client implementation for Neos Flow applications",
+    "authors": [
+        {
+            "name": "Robert Lemke",
+            "email": "robert@flownative.com",
+            "homepage": "https://www.flownative.com",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "email": "support@flownative.com"
+    },
+    "funding": [
+        {
+            "type": "github",
+            "url": "https://github.com/sponsors/robertlemke"
+        }
+    ],
+    "require": {
+        "neos/flow": "~6.0",
+        "guzzlehttp/guzzle": "^6.3",
+        "flownative/oauth2-client": "^2.0",
+        "phpseclib/phpseclib": "^2.0",
+        "lcobucci/jwt": "^3.3"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "~8.0",
+        "phpunit/php-code-coverage": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Flownative\\OpenIdConnect\\Client\\": "Classes"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "extra": {
+        "applied-flow-migrations": [
+        ]
     }
-  ],
-  "support": {
-    "email": "support@flownative.com"
-  },
-  "require": {
-    "neos/flow": "^4.0 || ^5.0 || dev-master",
-    "guzzlehttp/guzzle": "6.3.*",
-    "flownative/oauth2-client": "dev-master",
-    "phpseclib/phpseclib": "^2.0",
-    "lcobucci/jwt": "^3.3"
-  },
-  "autoload": {
-    "psr-4": {
-      "Flownative\\OpenIdConnect\\Client\\": "Classes"
-    }
-  },
-  "extra": {
-    "applied-flow-migrations": [
-    ]
-  }
 }

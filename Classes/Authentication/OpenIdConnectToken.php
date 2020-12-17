@@ -1,10 +1,10 @@
 <?php
-declare(strict_types = 1);
+declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
-use Flownative\OAuth2\Client\OAuthClient;
 use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
+use Flownative\OpenIdConnect\Client\OAuthClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Mvc\ActionRequest;
@@ -33,6 +33,11 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     protected $cookies = [];
 
     /**
+     * @var string
+     */
+    protected $authorizationHeader;
+
+    /**
      * @param ActionRequest $actionRequest
      * @throws InvalidAuthenticationStatusException
      */
@@ -43,6 +48,16 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
         $this->queryParameters = $httpRequest->getQueryParams();
         $this->cookies = $httpRequest->getCookieParams();
+
+        if ($httpRequest->hasHeader('Authorization')) {
+            $this->authorizationHeader = $httpRequest->getHeader('Authorization');
+        } elseif ($httpRequest->hasHeader('authorization')) {
+            $this->authorizationHeader = $httpRequest->getHeader('Authorization');
+        }
+
+        if (is_array($this->authorizationHeader)) {
+            $this->authorizationHeader = reset($this->authorizationHeader);
+        }
     }
 
     /**
@@ -57,9 +72,13 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
      */
     public function extractIdentityTokenFromRequest(string $cookieName): IdentityToken
     {
-        if (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
-            if (!isset($this->queryParameters[OAuthClient::STATE_QUERY_PARAMETER_NAME])) {
-                throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', OAuthClient::STATE_QUERY_PARAMETER_NAME), 1560350311);
+        if ($this->authorizationHeader !== null) {
+            $identityToken = $this->extractIdentityTokenFromAuthorizationHeader($this->authorizationHeader);
+
+        } elseif (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
+            $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
+            if (!isset($this->queryParameters[$authorizationIdQueryParameterName])) {
+                throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', $authorizationIdQueryParameterName), 1560350311);
             }
             try {
                 $tokenArguments = TokenArguments::fromSignedString($this->queryParameters[self::OIDC_PARAMETER_NAME]);
@@ -68,13 +87,13 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
                 throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
             }
 
-            $authorizationIdentifier = $this->queryParameters[OAuthClient::STATE_QUERY_PARAMETER_NAME];
+            $authorizationIdentifier = $this->queryParameters[$authorizationIdQueryParameterName];
             $client = new OpenIdConnectClient($tokenArguments[TokenArguments::SERVICE_NAME]);
 
             try {
                 $identityToken = $client->getIdentityToken($authorizationIdentifier);
             } catch (ServiceException | ConnectionException $exception) {
-                throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s"', $authorizationIdentifier), 1560350413, $exception);
+                throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s": %s', $authorizationIdentifier, $exception->getMessage()), 1560350413, $exception);
             }
         } else {
             $identityToken = $this->extractIdentityTokenFromCookie($cookieName);
@@ -85,9 +104,32 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     }
 
     /**
-     * @param string $cookieName
+     * @param string $authorizationHeader
      * @return IdentityToken
      * @throws AccessDeniedException | AuthenticationRequiredException | InvalidAuthenticationStatusException
+     */
+    private function extractIdentityTokenFromAuthorizationHeader(string $authorizationHeader): IdentityToken
+    {
+        if (strpos($this->authorizationHeader, 'Bearer ') !== 0) {
+            $this->setAuthenticationStatus(TokenInterface::NO_CREDENTIALS_GIVEN);
+            throw new AuthenticationRequiredException('Could not extract access token from Authorization header: "Bearer" keyword is missing', 1589283608);
+        }
+
+        try {
+            $jwt = substr($this->authorizationHeader, strlen('Bearer '));
+            $identityToken = IdentityToken::fromJwt($jwt);
+        } catch (\InvalidArgumentException $exception) {
+            $this->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
+            throw new AccessDeniedException('Could not extract JWT from Authorization header', 1589283968, $exception);
+        }
+        return $identityToken;
+    }
+
+    /**
+     * @param string $cookieName
+     * @return IdentityToken
+     * @throws AuthenticationRequiredException
+     * @throws InvalidAuthenticationStatusException
      */
     private function extractIdentityTokenFromCookie(string $cookieName): IdentityToken
     {
@@ -100,7 +142,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
             $identityToken = IdentityToken::fromJwt($jwt);
         } catch (\InvalidArgumentException $exception) {
             $this->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
-            throw new AccessDeniedException(sprintf('Could not extract JWT from cookie "%s"', $cookieName), 1560349541, $exception);
+            throw new AuthenticationRequiredException(sprintf('Could not extract JWT from cookie "%s"', $cookieName), 1560349541, $exception);
         }
         return $identityToken;
     }
