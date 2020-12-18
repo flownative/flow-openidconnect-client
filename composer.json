@@ -21,9 +21,9 @@
         }
     ],
     "require": {
-        "neos/flow": "~6.0",
+        "neos/flow": "^6.0 || ^7.0",
         "guzzlehttp/guzzle": "^6.3",
-        "flownative/oauth2-client": "^2.0",
+        "flownative/oauth2-client": "^2.0 || dev-flow-7-compatibility",
         "phpseclib/phpseclib": "^2.0",
         "lcobucci/jwt": "^3.3"
     },
