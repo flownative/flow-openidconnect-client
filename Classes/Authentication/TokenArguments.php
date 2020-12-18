@@ -3,9 +3,9 @@ declare(strict_types = 1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Neos\Flow\Annotations as Flow;
-use Neos\Flow\Log\PsrSystemLoggerInterface;
 use Neos\Flow\Security\Cryptography\HashService;
 use Neos\Flow\Security\Exception\InvalidHashException;
+use Psr\Log\LoggerInterface;
 
 final class TokenArguments implements \ArrayAccess
 {
@@ -20,7 +20,7 @@ final class TokenArguments implements \ArrayAccess
 
     /**
      * @Flow\Inject
-     * @var PsrSystemLoggerInterface
+     * @var LoggerInterface
      */
     protected $logger;
 
