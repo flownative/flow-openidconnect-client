@@ -8,16 +8,14 @@ Flownative:
 #            clientId: '@!EDD5.370D.8247.FED9!0001!B1C9.92C1!1008!13DB.54D8.65DE.2761'
 #            clientSecret: 'very-secret'
 
+#      middleware:
+#        cookie:
+#          name: 'your_own_cookie_name'
+#          secure: true
+#          sameSite: 'strict'
+
 #Neos:
 #  Flow:
-#    http:
-#      chain:
-#        'postprocess':
-#          chain:
-#            'Flownative.OpenIdConnect.Client:setJwtCookie':
-#              componentOptions:
-#                cookieName: 'your-own-cookie-name-jwt'
-
 #    security:
 #      authentication:
 #        providers:
