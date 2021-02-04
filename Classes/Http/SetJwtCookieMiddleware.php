@@ -68,9 +68,9 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
 
         $account = $this->securityContext->getAccountByAuthenticationProviderName($this->options['authenticationProviderName']);
         if ($account === null) {
-            $this->logger->debug(sprintf('OpenID Connect: No account is authenticated using the provider %s, removing JWT cookie "%s" if it exists.', $this->options['authenticationProviderName'], $this->options['cookie']['name']), LogEnvironment::fromMethodName(__METHOD__));
             if (isset($request->getCookieParams()[$this->options['cookie']['name']])) {
-                    return $this->removeJwtCookie($response);
+                $this->logger->debug(sprintf('OpenID Connect: No account is authenticated using the provider %s, removing JWT cookie "%s".', $this->options['authenticationProviderName'], $this->options['cookie']['name']), LogEnvironment::fromMethodName(__METHOD__));
+                return $this->removeJwtCookie($response);
             }
             return $response;
         }
