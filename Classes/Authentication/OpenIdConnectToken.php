@@ -92,6 +92,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
             try {
                 $identityToken = $client->getIdentityToken($authorizationIdentifier);
+                $client->removeAuthorization($authorizationIdentifier);
             } catch (ServiceException | ConnectionException $exception) {
                 throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s": %s', $authorizationIdentifier, $exception->getMessage()), 1560350413, $exception);
             }
