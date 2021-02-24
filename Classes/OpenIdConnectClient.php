@@ -258,6 +258,17 @@ final class OpenIdConnectClient
     }
 
     /**
+     * Removes the specified authorization, so that it can't be used again
+     *
+     * @param string $authorizationIdentifier
+     * @return void
+     */
+    public function removeAuthorization(string $authorizationIdentifier): void
+    {
+        $this->oAuthClient->removeAuthorization($authorizationIdentifier);
+    }
+
+    /**
      * Retrieves the JSON Web Key Set from the endpoint configured via the "jwksUri" option
      *
      * @return array
