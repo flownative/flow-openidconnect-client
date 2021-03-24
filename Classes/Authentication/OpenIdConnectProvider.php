@@ -8,6 +8,7 @@ use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\ServiceException;
+use Neos\Cache\Exception as CacheException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Account;
@@ -21,7 +22,6 @@ use Neos\Flow\Security\Exception\NoSuchRoleException;
 use Neos\Flow\Security\Exception\UnsupportedAuthenticationTokenException;
 use Neos\Flow\Security\Policy\PolicyService;
 use Neos\Flow\Security\Policy\Role;
-use Neos\Cache\Exception as CacheException;
 use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectProvider extends AbstractProvider
@@ -114,6 +114,10 @@ final class OpenIdConnectProvider extends AbstractProvider
             return;
         }
 
+        if (isset($this->options['audience']) && !$this->audienceMatches($this->options['audience'], $identityToken)) {
+            throw new AuthenticationException(sprintf('Open ID Connect: The identity token provided by the OIDC provider was not issued for this audience'), 1616568739);
+        }
+
         if (!isset($identityToken->values[$this->options['accountIdentifierTokenValueName']])) {
             throw new AuthenticationException(sprintf('Open ID Connect: The identity token provided by the OIDC provider contained no "%s" value, which is needed as an account identifier', $this->options['accountIdentifierTokenValueName']), 1560267246);
         }
@@ -165,6 +169,28 @@ final class OpenIdConnectProvider extends AbstractProvider
         $account->setAuthenticationProviderName($this->name);
         $account->setCredentialsSource(IdentityToken::fromJwt($jwt));
         return $account;
+    }
+
+    /**
+     * @param string $expectedAudience
+     * @param IdentityToken $identityToken
+     * @return bool
+     */
+    private function audienceMatches(string $expectedAudience, IdentityToken $identityToken): bool
+    {
+        if (empty($expectedAudience)) {
+            $this->logger->warning('OpenID Connect: The authentication provider was configured with an empty "audience" option', LogEnvironment::fromMethodName(__METHOD__));
+            return false;
+        }
+        if (!isset($identityToken->values['aud'])) {
+            $this->logger->warning(sprintf('OpenID Connect: The identity token (%s) contain no "aud" value', $identityToken->values['sub'] ?? '?'), LogEnvironment::fromMethodName(__METHOD__));
+            return false;
+        }
+        if ($expectedAudience !== $identityToken->values['aud']) {
+            $this->logger->warning(sprintf('OpenID Connect: The identity token (%s) was intended for audience "%s" but this authentication provider is configured as audience "%s"', $identityToken->values['sub'], $identityToken->values['aud'], $expectedAudience), LogEnvironment::fromMethodName(__METHOD__));
+            return false;
+        }
+        return true;
     }
 
     /**

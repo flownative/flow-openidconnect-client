@@ -77,8 +77,8 @@ header, body and signature.
 
 The ID Token provides information about an entity (for example, a user).
 The different bits of information could be a name, a URL pointing to a
-profile picture or an email address. These information bits are called
-"claims". And because they are signed, as part of the JWT, you can trust
+profile picture, or an email address. These information bits are called
+"claims". Because they are signed, as part of the JWT, you can trust
 them without having to specifically ask a central API.
 
 ### Bearer Access Token
@@ -89,6 +89,14 @@ access the resources for which the token was issued.
 
 Access tokens usually have a limited lifetime and are issued for a
 specific scope.
+
+### Audience
+The audience is the application or service which you want to protect
+with OpenId Connect. It is the intended recipient of the token and
+usually identified by an address, like
+`https://my-application.example.com`. However, like with XML namespaces,
+that address does not really have to exist and is just used as an
+identifier.
 
 ## Requirements
 
@@ -268,6 +276,7 @@ Neos:
             label: 'Neos Backend (OIDC)'
             provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
             providerOptions:
+              audience: 'https://www.example.com/neos'
               roles: ['Neos.Neos:Administrator']
               accountIdentifierTokenValueName: 'sub'
               serviceName: 'test'
@@ -281,9 +290,9 @@ Neos:
 
 ```
 
-Without further programming you need to manually create a Neos user which
-has the same username like the one provided in the "sub" claim by the
-OIDC identity provider.
+Without further programming you need to manually create a Neos user
+which has the same username as the one provided in the "sub" claim by
+the OIDC identity provider.
 
 ## Client Credentials Grant
 
@@ -443,7 +452,7 @@ compiling a list of roles.
 
 Check logs for hints if things are not working as expected.
 
-## Roles from Existing Account
+## Roles from an Existing Account
 
 As a third option, roles can be used from an existing account whose
 account identifier matches a given claim of the identity token. Or put
@@ -480,6 +489,34 @@ You may mix "rolesFromClaims" with "addRolesFromExistingAccount". In
 that case roles from claims and existing accounts will be merged.
 
 Again, check logs for hints if things are not working as expected.
+
+## More Authentication Provider Options
+
+When you are using the OpenID Connect Authentication Provider, you can
+provide options for additional security measures.
+
+### Audience Pinning
+
+It is recommended to specify the "audience" identifier of your
+application. That way, tokens issued by your identity provider will only
+accepted for authentication, if the audience string of the token ("aud")
+matches the string configured in your application. Without this
+configuration, your application would accept any token of your identity
+provider, if it has a valid signature and comes with the correct roles
+claim.
+
+```
+…
+        security:
+          authentication:
+            providers:
+              'Flownative.OpenIdConnect.Client:OidcProvider':
+                label: 'OpenID Connect'
+                provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
+                providerOptions:
+                  audience: 'https://www.example.com/my-application'
+                  …
+```
 
 ## More about OpenID Connect
 
