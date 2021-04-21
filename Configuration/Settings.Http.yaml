@@ -15,3 +15,4 @@ Flownative:
           name: 'flownative_oidc_jwt'
           secure: true
           sameSite: 'strict'
+          httpOnly: false
