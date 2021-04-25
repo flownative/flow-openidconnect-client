@@ -13,6 +13,7 @@ Flownative:
 #          name: 'your_own_cookie_name'
 #          secure: true
 #          sameSite: 'strict'
+#          httpOnly: true
 
 #Neos:
 #  Flow:

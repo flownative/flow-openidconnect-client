@@ -104,7 +104,7 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
      */
     private function setJwtCookie(ResponseInterface $response, string $jwt): ResponseInterface
     {
-        $jwtCookie = new Cookie($this->options['cookie']['name'], $jwt, 0, null, null, '/', $this->options['cookie']['secure'], false, $this->options['cookie']['sameSite']);
+        $jwtCookie = new Cookie($this->options['cookie']['name'], $jwt, 0, null, null, '/', $this->options['cookie']['secure'], $this->options['cookie']['httpOnly'], $this->options['cookie']['sameSite']);
         return $response->withAddedHeader('Set-Cookie', (string)$jwtCookie);
     }
 
@@ -114,7 +114,7 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
      */
     private function removeJwtCookie(ResponseInterface $response): ResponseInterface
     {
-        $emptyJwtCookie = new Cookie($this->options['cookie']['name'], '', 1, null, null, '/', $this->options['cookie']['secure'], false, $this->options['cookie']['sameSite']);
+        $emptyJwtCookie = new Cookie($this->options['cookie']['name'], '', 1, null, null, '/', $this->options['cookie']['secure'], $this->options['cookie']['httpOnly'], $this->options['cookie']['sameSite']);
         return $response->withAddedHeader('Set-Cookie', (string)$emptyJwtCookie);
     }
 }
