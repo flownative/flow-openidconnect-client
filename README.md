@@ -447,6 +447,23 @@ When a user logs in and her identity token has a value
 identifiers, the OpenID Connect provider will automatically assign these
 roles to the transient account.
 
+Roles can be mapped in case their value don't match the required Flow role pattern (`<Package-Key>:<Role>`)
+or if multiple roles should be translated to a single Flow role:
+
+```
+…
+    providerOptions:
+      rolesFromClaims:
+        -
+          name: 'https://flownative.com/roles'
+          mapping:
+            'role1': 'Some.Package:SomeRole1'
+            'role2': 'Some.Package:SomeOtherRole'
+            'role3': 'Some.Package:SomeRole'
+      …
+ 
+```
+
 You may specify multiple claim names which are all considered for
 compiling a list of roles.
 

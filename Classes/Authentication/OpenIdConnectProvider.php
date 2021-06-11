@@ -207,8 +207,12 @@ final class OpenIdConnectProvider extends AbstractProvider
         }
 
         if (isset($this->options['rolesFromClaims']) && is_array($this->options['rolesFromClaims'])) {
-            $claims = array_unique($this->options['rolesFromClaims']);
-            foreach ($claims as $claim) {
+            foreach ($this->options['rolesFromClaims'] as $claim) {
+                $mapping = null;
+                if (is_array($claim)) {
+                    $mapping = $claim['mapping'] ?? null;
+                    $claim = $claim['name'];
+                }
                 if (!isset($identityToken->values[$claim])) {
                     $this->logger->debug(sprintf('OpenID Connect: Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
                     continue;
@@ -218,7 +222,14 @@ final class OpenIdConnectProvider extends AbstractProvider
                     continue;
                 }
 
-                foreach ($identityToken->values[$claim] as $i => $roleIdentifier) {
+                foreach ($identityToken->values[$claim] as $roleIdentifier) {
+                    if ($mapping !== null) {
+                        if (!array_key_exists($roleIdentifier, $mapping)) {
+                            $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no corresponding mapping configured.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
+                            continue;
+                        }
+                        $roleIdentifier = $mapping[$roleIdentifier];
+                    }
                     if ($this->policyService->hasRole($roleIdentifier)) {
                         $roleIdentifiers[] = $roleIdentifier;
                     } else {
