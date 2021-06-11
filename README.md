@@ -447,7 +447,7 @@ When a user logs in and her identity token has a value
 identifiers, the OpenID Connect provider will automatically assign these
 roles to the transient account.
 
-Roles can be mapped in case their value don't match the required Flow role pattern (`<Package-Key>:<Role>`)
+Roles can be mapped in case their values don't match the required Flow role pattern (`<Package-Key>:<Role>`)
 or if multiple roles should be translated to a single Flow role:
 
 ```
