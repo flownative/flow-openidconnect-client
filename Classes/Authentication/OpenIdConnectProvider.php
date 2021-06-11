@@ -210,7 +210,13 @@ final class OpenIdConnectProvider extends AbstractProvider
             foreach ($this->options['rolesFromClaims'] as $claim) {
                 $mapping = null;
                 if (is_array($claim)) {
-                    $mapping = $claim['mapping'] ?? null;
+                    if (!array_key_exists('mapping', $claim)) {
+                        throw new \RuntimeException(sprintf('If "rolesFromClaims" are specified as array, a "mapping" has to be provided'), 1623421601);
+                    }
+                    $mapping = $claim['mapping'];
+                    if (!array_key_exists('name', $claim)) {
+                        throw new \RuntimeException(sprintf('If "rolesFromClaims" are specified as array, a "name" has to be provided'), 1623421648);
+                    }
                     $claim = $claim['name'];
                 }
                 if (!isset($identityToken->values[$claim])) {
