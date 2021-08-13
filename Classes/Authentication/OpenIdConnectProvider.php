@@ -212,11 +212,14 @@ final class OpenIdConnectProvider extends AbstractProvider
                 $mapping = null;
                 if (is_array($claim)) {
                     if (!array_key_exists('mapping', $claim)) {
-                        throw new \RuntimeException(sprintf('If "rolesFromClaims" are specified as array, a "mapping" has to be provided'), 1623421601);
+                        throw new \RuntimeException('If "rolesFromClaims" are specified as array, a "mapping" has to be provided', 1623421601);
                     }
                     $mapping = $claim['mapping'];
+                    if (!is_array($mapping)) {
+                        throw new \RuntimeException(sprintf('If "rolesFromClaims" are specified as array, a "mapping" has to be provided as array, given: %s', gettype($mapping)), 1623656982);
+                    }
                     if (!array_key_exists('name', $claim)) {
-                        throw new \RuntimeException(sprintf('If "rolesFromClaims" are specified as array, a "name" has to be provided'), 1623421648);
+                        throw new \RuntimeException('If "rolesFromClaims" are specified as array, a "name" has to be provided', 1623421648);
                     }
                     $claim = $claim['name'];
                 }
