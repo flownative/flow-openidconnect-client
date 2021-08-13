@@ -125,6 +125,7 @@ final class OpenIdConnectProvider extends AbstractProvider
         $roleIdentifiers = $this->getConfiguredRoles($identityToken);
 
         $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $roleIdentifiers, $identityToken->asJwt());
+        $account->authenticationAttempted(TokenInterface::AUTHENTICATION_SUCCESSFUL);
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
