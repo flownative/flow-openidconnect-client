@@ -38,7 +38,7 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
      */
     private $authenticationProviderConfiguration;
 
-    public function __construct(array $options, array $authenticationProviderConfiguration)
+    public function __construct(array $options = [], array $authenticationProviderConfiguration = [])
     {
         $this->options = $options;
         $this->authenticationProviderConfiguration = $authenticationProviderConfiguration;
