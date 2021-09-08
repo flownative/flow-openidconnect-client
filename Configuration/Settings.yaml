@@ -1,6 +1,9 @@
 Flownative:
   OpenIdConnect:
     Client:
+      middleware:
+        cookie:
+          secure: true
       services: []
 #        exampleService:
 #          options:
