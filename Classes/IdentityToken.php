@@ -197,7 +197,7 @@ class IdentityToken
     private function getMatchingKeyForJws(array $keys, string $algorithm, ?string $keyIdentifier): array {
         foreach ($keys as $key) {
             if ($key['kty'] === 'RSA') {
-                if ($keyIdentifier !== null || $key['kid'] === $keyIdentifier) {
+                if ($keyIdentifier === null || $key['kid'] === $keyIdentifier) {
                     return $key;
                 }
             } else if (isset($key['alg']) && $key['alg'] === $algorithm && $key['kid'] === $keyIdentifier) {
