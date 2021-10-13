@@ -1,9 +1,6 @@
 Flownative:
   OpenIdConnect:
     Client:
-      middleware:
-        cookie:
-          secure: true
       services: []
 #        exampleService:
 #          options:
@@ -13,6 +10,14 @@ Flownative:
 
 #Neos:
 #  Flow:
+#    http:
+#      chain:
+#        'postprocess':
+#          chain:
+#            'Flownative.OpenIdConnect.Client:setJwtCookie':
+#              componentOptions:
+#                cookieName: 'your-own-cookie-name-jwt'
+
 #    security:
 #      authentication:
 #        providers:
