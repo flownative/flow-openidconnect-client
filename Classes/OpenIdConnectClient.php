@@ -169,7 +169,7 @@ final class OpenIdConnectClient
         $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid']))));
 
         $accessToken = null;
-        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $clientSecret, $scope);
+        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $clientSecret, $scope, $additionalParameters);
         $authorization = $this->getAuthorization($authorizationId);
 
         if ($authorization !== null) {

@@ -1,15 +1,7 @@
 Neos:
   Flow:
     http:
-      chain:
-        'postprocess':
-          chain:
-            'Flownative.OpenIdConnect.Client:setJwtCookie':
-              'position': 'after setSessionCookie'
-              component: 'Flownative\OpenIdConnect\Client\Http\SetJwtCookieComponent'
-              componentOptions:
-                authenticationProviderName: 'Flownative.OpenIdConnect.Client:OidcProvider'
-                cookie:
-                  name: 'flownative_oidc_jwt'
-                  secure: true
-                  sameSite: 'strict'
+      middlewares:
+        'Flownative.OpenIdConnect.Client:setJwtCookie':
+          position: 'after session'
+          middleware: 'Flownative\OpenIdConnect\Client\Http\SetJwtCookieMiddleware'

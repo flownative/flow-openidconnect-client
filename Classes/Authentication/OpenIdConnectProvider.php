@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Flownative\OpenIdConnect\Client\AuthenticationException;
@@ -7,8 +8,8 @@ use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\ServiceException;
+use Neos\Cache\Exception as CacheException;
 use Neos\Flow\Annotations as Flow;
-use Neos\Flow\Log\PsrSystemLoggerInterface;
 use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\AccountRepository;
@@ -21,7 +22,7 @@ use Neos\Flow\Security\Exception\NoSuchRoleException;
 use Neos\Flow\Security\Exception\UnsupportedAuthenticationTokenException;
 use Neos\Flow\Security\Policy\PolicyService;
 use Neos\Flow\Security\Policy\Role;
-use Neos\Cache\Exception as CacheException;
+use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectProvider extends AbstractProvider
 {
@@ -39,7 +40,7 @@ final class OpenIdConnectProvider extends AbstractProvider
 
     /**
      * @Flow\Inject
-     * @var PsrSystemLoggerInterface
+     * @var LoggerInterface
      */
     protected $logger;
 
@@ -113,6 +114,10 @@ final class OpenIdConnectProvider extends AbstractProvider
             return;
         }
 
+        if (isset($this->options['audience']) && !$this->audienceMatches($this->options['audience'], $identityToken)) {
+            throw new AuthenticationException(sprintf('Open ID Connect: The identity token provided by the OIDC provider was not issued for this audience'), 1616568739);
+        }
+
         if (!isset($identityToken->values[$this->options['accountIdentifierTokenValueName']])) {
             throw new AuthenticationException(sprintf('Open ID Connect: The identity token provided by the OIDC provider contained no "%s" value, which is needed as an account identifier', $this->options['accountIdentifierTokenValueName']), 1560267246);
         }
@@ -120,6 +125,7 @@ final class OpenIdConnectProvider extends AbstractProvider
         $roleIdentifiers = $this->getConfiguredRoles($identityToken);
 
         $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $roleIdentifiers, $identityToken->asJwt());
+        $account->authenticationAttempted(TokenInterface::AUTHENTICATION_SUCCESSFUL);
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
@@ -167,6 +173,28 @@ final class OpenIdConnectProvider extends AbstractProvider
     }
 
     /**
+     * @param string $expectedAudience
+     * @param IdentityToken $identityToken
+     * @return bool
+     */
+    private function audienceMatches(string $expectedAudience, IdentityToken $identityToken): bool
+    {
+        if (empty($expectedAudience)) {
+            $this->logger->warning('OpenID Connect: The authentication provider was configured with an empty "audience" option', LogEnvironment::fromMethodName(__METHOD__));
+            return false;
+        }
+        if (!isset($identityToken->values['aud'])) {
+            $this->logger->warning(sprintf('OpenID Connect: The identity token (%s) contain no "aud" value', $identityToken->values['sub'] ?? '?'), LogEnvironment::fromMethodName(__METHOD__));
+            return false;
+        }
+        if ($expectedAudience !== $identityToken->values['aud']) {
+            $this->logger->warning(sprintf('OpenID Connect: The identity token (%s) was intended for audience "%s" but this authentication provider is configured as audience "%s"', $identityToken->values['sub'], $identityToken->values['aud'], $expectedAudience), LogEnvironment::fromMethodName(__METHOD__));
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * @param IdentityToken $identityToken
      * @return array
      */
@@ -180,8 +208,21 @@ final class OpenIdConnectProvider extends AbstractProvider
         }
 
         if (isset($this->options['rolesFromClaims']) && is_array($this->options['rolesFromClaims'])) {
-            $claims = array_unique($this->options['rolesFromClaims']);
-            foreach ($claims as $claim) {
+            foreach ($this->options['rolesFromClaims'] as $claim) {
+                $mapping = null;
+                if (is_array($claim)) {
+                    if (!array_key_exists('mapping', $claim)) {
+                        throw new \RuntimeException('If "rolesFromClaims" are specified as array, a "mapping" has to be provided', 1623421601);
+                    }
+                    $mapping = $claim['mapping'];
+                    if (!is_array($mapping)) {
+                        throw new \RuntimeException(sprintf('If "rolesFromClaims" are specified as array, a "mapping" has to be provided as array, given: %s', gettype($mapping)), 1623656982);
+                    }
+                    if (!array_key_exists('name', $claim)) {
+                        throw new \RuntimeException('If "rolesFromClaims" are specified as array, a "name" has to be provided', 1623421648);
+                    }
+                    $claim = $claim['name'];
+                }
                 if (!isset($identityToken->values[$claim])) {
                     $this->logger->debug(sprintf('OpenID Connect: Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
                     continue;
@@ -191,7 +232,14 @@ final class OpenIdConnectProvider extends AbstractProvider
                     continue;
                 }
 
-                foreach ($identityToken->values[$claim] as $i => $roleIdentifier) {
+                foreach ($identityToken->values[$claim] as $roleIdentifier) {
+                    if ($mapping !== null) {
+                        if (!array_key_exists($roleIdentifier, $mapping)) {
+                            $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no corresponding mapping configured.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
+                            continue;
+                        }
+                        $roleIdentifier = $mapping[$roleIdentifier];
+                    }
                     if ($this->policyService->hasRole($roleIdentifier)) {
                         $roleIdentifiers[] = $roleIdentifier;
                     } else {
