@@ -264,6 +264,8 @@ Flownative:
         cookie:      
           # For testing purposes allow cookies without HTTPS:
           secure: false
+          # Create an HTTP only cookie for increased security
+          httpOnly: true
 
 Neos:
   Flow:
