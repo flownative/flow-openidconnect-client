@@ -4,6 +4,8 @@ namespace Flownative\OpenIdConnect\Client\Http;
 
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\IdentityToken;
+use Flownative\OpenIdConnect\Client\OAuthClient;
+use GuzzleHttp\Psr7\Query;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\Cookie;
 use Neos\Flow\Log\Utility\LogEnvironment;
@@ -29,10 +31,20 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
     protected $logger;
 
     /**
-     * @Flow\InjectConfiguration(path="middleware")
      * @var array
      */
-    protected $options;
+    private $options;
+
+    /**
+     * @var array
+     */
+    private $authenticationProviderConfiguration;
+
+    public function __construct(array $options, array $authenticationProviderConfiguration)
+    {
+        $this->options = $options;
+        $this->authenticationProviderConfiguration = $authenticationProviderConfiguration;
+    }
 
     /**
      * @return void
@@ -62,59 +74,78 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
             $this->logger->debug('OpenID Connect: Cannot send JWT cookie because the security context could not be initialized.', LogEnvironment::fromMethodName(__METHOD__));
             return $response;
         }
-        if (!$this->isOpenIdConnectAuthentication()) {
-            return $response;
-        }
-
-        $account = $this->securityContext->getAccountByAuthenticationProviderName($this->options['authenticationProviderName']);
-        if ($account === null) {
-            if (isset($request->getCookieParams()[$this->options['cookie']['name']])) {
-                $this->logger->debug(sprintf('OpenID Connect: No account is authenticated using the provider %s, removing JWT cookie "%s".', $this->options['authenticationProviderName'], $this->options['cookie']['name']), LogEnvironment::fromMethodName(__METHOD__));
-                return $this->removeJwtCookie($response);
-            }
-            return $response;
-        }
-
-        $identityToken = $account->getCredentialsSource();
-        if (!$identityToken instanceof IdentityToken) {
-            $this->logger->error(sprintf('OpenID Connect: No identity token found in credentials source of account %s - could not set JWT cookie.', $account->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
-            return $response;
-        }
-
-        return $this->setJwtCookie($response, $identityToken->asJwt());
-    }
-
-    /**
-     * @return bool
-     */
-    private function isOpenIdConnectAuthentication(): bool
-    {
         foreach ($this->securityContext->getAuthenticationTokensOfType(OpenIdConnectToken::class) as $token) {
-            if ($token->getAuthenticationProviderName() === $this->options['authenticationProviderName']) {
-                return true;
+            $providerName = $token->getAuthenticationProviderName();
+            $providerOptions = $this->authenticationProviderConfiguration[$token->getAuthenticationProviderName()]['providerOptions'] ?? [];
+            $account = $this->securityContext->getAccountByAuthenticationProviderName($providerName);
+            $cookieName = $providerOptions['jwtCookieName'] ?? $this->options['cookie']['name'] ?? 'flownative_oidc_jwt';
+            $cookieSecure = $this->options['cookie']['secure'] ?? true;
+            $cookieSameSite = $this->options['cookie']['sameSite'] ?? 'strict';
+            if ($account === null) {
+                if (isset($request->getCookieParams()[$cookieName])) {
+                    $this->logger->debug(sprintf('OpenID Connect: No account is authenticated using the provider %s, removing JWT cookie "%s".', $providerName, $cookieName), LogEnvironment::fromMethodName(__METHOD__));
+                    $response = $this->removeJwtCookie($response, $cookieName, $cookieSecure, $cookieSameSite);
+                }
+                continue;
             }
+            $identityToken = $account->getCredentialsSource();
+            if (!$identityToken instanceof IdentityToken) {
+                $this->logger->error(sprintf('OpenID Connect: No identity token found in credentials source of account %s - could not set JWT cookie.', $account->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
+                continue;
+            }
+
+            $response = $this->setJwtCookie($response, $cookieName, $cookieSecure, $cookieSameSite, $identityToken->asJwt());
         }
-        return false;
+
+        return $this->removeOidcQueryParameters($request, $response);
     }
 
     /**
      * @param ResponseInterface $response
+     * @param string $cookieName
+     * @param bool $secure
+     * @param string $sameSite
      * @param string $jwt
      * @return ResponseInterface
      */
-    private function setJwtCookie(ResponseInterface $response, string $jwt): ResponseInterface
+    private function setJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, string $sameSite, string $jwt): ResponseInterface
     {
-        $jwtCookie = new Cookie($this->options['cookie']['name'], $jwt, 0, null, null, '/', $this->options['cookie']['secure'], false, $this->options['cookie']['sameSite']);
+        $jwtCookie = new Cookie($cookieName, $jwt, 0, null, null, '/', $secure, false, $sameSite);
         return $response->withAddedHeader('Set-Cookie', (string)$jwtCookie);
     }
 
     /**
      * @param ResponseInterface $response
+     * @param string $cookieName
+     * @param bool $secure
+     * @param string $sameSite
      * @return ResponseInterface
      */
-    private function removeJwtCookie(ResponseInterface $response): ResponseInterface
+    private function removeJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, string $sameSite): ResponseInterface
     {
-        $emptyJwtCookie = new Cookie($this->options['cookie']['name'], '', 1, null, null, '/', $this->options['cookie']['secure'], false, $this->options['cookie']['sameSite']);
+        $emptyJwtCookie = new Cookie($cookieName, '', 1, null, null, '/', $secure, false, $sameSite);
         return $response->withAddedHeader('Set-Cookie', (string)$emptyJwtCookie);
+    }
+
+    /**
+     * Removes any `?flownative_oidc=<...>&flownative_oauth2_authorization_id_oidc=<...>` from the request URL
+     * by triggering a redirect to the URL without those query parameters
+     *
+     * @param ServerRequestInterface $request
+     * @param ResponseInterface $response
+     * @return ResponseInterface
+     */
+    private function removeOidcQueryParameters(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
+    {
+        if ($response->hasHeader('Location')) {
+            return $response;
+        }
+        $queryParameters = Query::parse($request->getUri()->getQuery());
+        $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
+        if (!isset($queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME]) && !isset($queryParameters[$authorizationIdQueryParameterName])) {
+            return $response;
+        }
+        unset($queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME], $queryParameters[$authorizationIdQueryParameterName]);
+        return $response->withHeader('Location', (string)$request->getUri()->withQuery(Query::build($queryParameters)));
     }
 }
