@@ -80,11 +80,12 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
             $account = $this->securityContext->getAccountByAuthenticationProviderName($providerName);
             $cookieName = $providerOptions['jwtCookieName'] ?? $this->options['cookie']['name'] ?? 'flownative_oidc_jwt';
             $cookieSecure = $this->options['cookie']['secure'] ?? true;
+            $cookieHttpOnly = $this->options['cookie']['httpOnly'] ?? false;
             $cookieSameSite = $this->options['cookie']['sameSite'] ?? 'strict';
             if ($account === null) {
                 if (isset($request->getCookieParams()[$cookieName])) {
                     $this->logger->debug(sprintf('OpenID Connect: No account is authenticated using the provider %s, removing JWT cookie "%s".', $providerName, $cookieName), LogEnvironment::fromMethodName(__METHOD__));
-                    $response = $this->removeJwtCookie($response, $cookieName, $cookieSecure, $cookieSameSite);
+                    $response = $this->removeJwtCookie($response, $cookieName, $cookieSecure, $cookieHttpOnly, $cookieSameSite);
                 }
                 continue;
             }
@@ -94,7 +95,7 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
                 continue;
             }
 
-            $response = $this->setJwtCookie($response, $cookieName, $cookieSecure, $cookieSameSite, $identityToken->asJwt());
+            $response = $this->setJwtCookie($response, $cookieName, $cookieSecure, $cookieHttpOnly, $cookieSameSite, $identityToken->asJwt());
         }
         return $this->removeOidcQueryParameters($request, $response);
     }
@@ -103,13 +104,14 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
      * @param ResponseInterface $response
      * @param string $cookieName
      * @param bool $secure
+     * @param bool $httpOnly
      * @param string $sameSite
      * @param string $jwt
      * @return ResponseInterface
      */
-    private function setJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, string $sameSite, string $jwt): ResponseInterface
+    private function setJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, bool $httpOnly, string $sameSite, string $jwt): ResponseInterface
     {
-        $jwtCookie = new Cookie($cookieName, $jwt, 0, null, null, '/', $secure, false, $sameSite);
+        $jwtCookie = new Cookie($cookieName, $jwt, 0, null, null, '/', $secure, $httpOnly, $sameSite);
         return $response->withAddedHeader('Set-Cookie', (string)$jwtCookie);
     }
 
@@ -117,12 +119,13 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
      * @param ResponseInterface $response
      * @param string $cookieName
      * @param bool $secure
+     * @param bool $httpOnly
      * @param string $sameSite
      * @return ResponseInterface
      */
-    private function removeJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, string $sameSite): ResponseInterface
+    private function removeJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, bool $httpOnly, string $sameSite): ResponseInterface
     {
-        $emptyJwtCookie = new Cookie($cookieName, '', 1, null, null, '/', $secure, false, $sameSite);
+        $emptyJwtCookie = new Cookie($cookieName, '', 1, null, null, '/', $secure, $httpOnly, $sameSite);
         return $response->withAddedHeader('Set-Cookie', (string)$emptyJwtCookie);
     }
 

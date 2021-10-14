@@ -4,6 +4,7 @@ Flownative:
       middleware:
         cookie:
           secure: true
+          httpOnly: false
       services: []
 #        exampleService:
 #          options:
