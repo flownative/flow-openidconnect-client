@@ -6,6 +6,8 @@ use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OAuthClient;
 use GuzzleHttp\Psr7\Query;
+use Neos\Flow\Http\Component\ComponentContext;
+use Neos\Flow\Http\Component\TrustedProxiesComponent;
 use Neos\Flow\Http\Cookie;
 use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Context as SecurityContext;
@@ -140,7 +142,14 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
     {
         if ($response->hasHeader('Location')) {
             return $response;
+        // Provide backwards-compatibility with Flow 6.3 and earlier, where the Trusted Proxies Middleware did not exist yet:
+        if (class_exists(TrustedProxiesComponent::class) && class_exists(ComponentContext::class)) {
+            $componentContext = new ComponentContext($request, $response);
+            $trustedProxiesComponent = new TrustedProxiesComponent();
+            $trustedProxiesComponent->handle($componentContext);
+            $request = $componentContext->getHttpRequest();
         }
+
         $queryParameters = Query::parse($request->getUri()->getQuery());
         $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
         if (!isset($queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME]) && !isset($queryParameters[$authorizationIdQueryParameterName])) {
