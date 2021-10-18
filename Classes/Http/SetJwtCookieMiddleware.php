@@ -61,6 +61,9 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
             $this->logger->warning('OpenID Connect: Option "secureCookie" was used - please use "cookie.secure" instead.', LogEnvironment::fromMethodName(__METHOD__));
             $this->options['cookie']['secure'] = $this->options['secureCookie'];
         }
+        if (!isset($this->options['disableTrustedProxiesComponentCompatibility'])) {
+            $this->options['disableTrustedProxiesComponentCompatibility'] = false;
+        }
     }
 
     /**
@@ -154,7 +157,7 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
     private function withRedirectToRemoveOidcQueryParameters(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
     {
         // Provide backwards-compatibility with Flow 6.3 and earlier, where the Trusted Proxies Middleware did not exist yet:
-        if (class_exists(TrustedProxiesComponent::class) && class_exists(ComponentContext::class)) {
+        if (class_exists(TrustedProxiesComponent::class) && class_exists(ComponentContext::class) && $this->options['disableTrustedProxiesComponentCompatibility'] === false) {
             $componentContext = new ComponentContext($request, $response);
             $trustedProxiesComponent = new TrustedProxiesComponent();
             $trustedProxiesComponent->handle($componentContext);
