@@ -6,6 +6,7 @@ use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OAuthClient;
 use GuzzleHttp\Psr7\Query;
+use GuzzleHttp\Psr7\Utils;
 use Neos\Flow\Http\Component\ComponentContext;
 use Neos\Flow\Http\Component\TrustedProxiesComponent;
 use Neos\Flow\Http\Cookie;
@@ -75,14 +76,16 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
             $this->logger->debug('OpenID Connect: Cannot send JWT cookie because the security context could not be initialized.', LogEnvironment::fromMethodName(__METHOD__));
             return $response;
         }
+
+        $cookieSecure = $this->options['cookie']['secure'] ?? true;
+        $cookieHttpOnly = $this->options['cookie']['httpOnly'] ?? false;
+        $cookieSameSite = $this->options['cookie']['sameSite'] ?? Cookie::SAMESITE_LAX;
+
         foreach ($this->securityContext->getAuthenticationTokensOfType(OpenIdConnectToken::class) as $token) {
             $providerName = $token->getAuthenticationProviderName();
             $providerOptions = $this->authenticationProviderConfiguration[$token->getAuthenticationProviderName()]['providerOptions'] ?? [];
             $account = $this->securityContext->getAccountByAuthenticationProviderName($providerName);
             $cookieName = $providerOptions['jwtCookieName'] ?? $this->options['cookie']['name'] ?? 'flownative_oidc_jwt';
-            $cookieSecure = $this->options['cookie']['secure'] ?? true;
-            $cookieHttpOnly = $this->options['cookie']['httpOnly'] ?? false;
-            $cookieSameSite = $this->options['cookie']['sameSite'] ?? 'strict';
             if ($account === null) {
                 if (isset($request->getCookieParams()[$cookieName])) {
                     $this->logger->debug(sprintf('OpenID Connect: No account is authenticated using the provider %s, removing JWT cookie "%s".', $providerName, $cookieName), LogEnvironment::fromMethodName(__METHOD__));
@@ -98,7 +101,17 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
 
             $response = $this->setJwtCookie($response, $cookieName, $cookieSecure, $cookieHttpOnly, $cookieSameSite, $identityToken->asJwt());
         }
-        return $this->removeOidcQueryParameters($request, $response);
+
+        // Note: A redirect with a Location header only works if the JWT cookie has a "lax" Same Site configuration. If Same Site of the
+        // cookie is set to "strict", apparently only an old-fashioned HTML meta redirect works fine in browsers, which may be error-prone.
+        //
+        // See also https://bugzilla.mozilla.org/show_bug.cgi?id=1465402
+        // and https://web.dev/samesite-cookies-explained/
+        if ($cookieSameSite !== Cookie::SAMESITE_STRICT && !$response->hasHeader('Location')) {
+            return $this->withRedirectToRemoveOidcQueryParameters($request, $response);
+        }
+
+        return $response;
     }
 
     /**
@@ -138,10 +151,8 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
      * @param ResponseInterface $response
      * @return ResponseInterface
      */
-    private function removeOidcQueryParameters(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
+    private function withRedirectToRemoveOidcQueryParameters(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
     {
-        if ($response->hasHeader('Location')) {
-            return $response;
         // Provide backwards-compatibility with Flow 6.3 and earlier, where the Trusted Proxies Middleware did not exist yet:
         if (class_exists(TrustedProxiesComponent::class) && class_exists(ComponentContext::class)) {
             $componentContext = new ComponentContext($request, $response);
@@ -155,7 +166,13 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
         if (!isset($queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME]) && !isset($queryParameters[$authorizationIdQueryParameterName])) {
             return $response;
         }
+
         unset($queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME], $queryParameters[$authorizationIdQueryParameterName]);
-        return $response->withHeader('Location', (string)$request->getUri()->withQuery(Query::build($queryParameters)));
+        $uri = $request->getUri()->withQuery(Query::build($queryParameters));
+
+        return $response
+            ->withBody(Utils::streamFor(sprintf('<html><head><meta http-equiv="refresh" content="0;url=%s"/></head></html>', htmlentities((string)$uri, ENT_QUOTES, 'utf-8'))))
+            ->withHeader('Location', (string)$uri)
+            ->withStatus(303);
     }
 }
