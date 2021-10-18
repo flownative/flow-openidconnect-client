@@ -17,14 +17,14 @@ use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Psr7\Uri;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\Context as SecurityContext;
-use Neos\Flow\Tests\UnitTestCase;
 use PHPUnit\Framework\MockObject\MockObject;
+use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
 
-class SetJwtCookieMiddlewareTest extends UnitTestCase
+class SetJwtCookieMiddlewareTest extends TestCase
 {
     /**
      * @var SecurityContext|MockObject
@@ -71,9 +71,7 @@ class SetJwtCookieMiddlewareTest extends UnitTestCase
 
     private function getMiddleware(array $options = [], array $authenticationProviderConfiguration = []): SetJwtCookieMiddleware
     {
-        $middleware = new SetJwtCookieMiddleware($options, $authenticationProviderConfiguration);
-        $this->inject($middleware, 'securityContext', $this->mockSecurityContext);
-        $this->inject($middleware, 'logger', $this->mockLogger);
+        $middleware = new SetJwtCookieMiddleware($options, $authenticationProviderConfiguration, $this->mockSecurityContext, $this->mockLogger);
         $middleware->initializeObject();
         return $middleware;
     }

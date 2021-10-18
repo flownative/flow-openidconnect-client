@@ -6,7 +6,6 @@ use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OAuthClient;
 use GuzzleHttp\Psr7\Query;
-use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\Cookie;
 use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Context as SecurityContext;
@@ -19,16 +18,14 @@ use Psr\Log\LoggerInterface;
 final class SetJwtCookieMiddleware implements MiddlewareInterface
 {
     /**
-     * @Flow\Inject
      * @var SecurityContext
      */
-    protected $securityContext;
+    private $securityContext;
 
     /**
-     * @Flow\Inject
      * @var LoggerInterface
      */
-    protected $logger;
+    private $logger;
 
     /**
      * @var array
@@ -40,10 +37,12 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
      */
     private $authenticationProviderConfiguration;
 
-    public function __construct(array $options, array $authenticationProviderConfiguration)
+    public function __construct(array $options, array $authenticationProviderConfiguration, SecurityContext $securityContext, LoggerInterface $logger)
     {
         $this->options = $options;
         $this->authenticationProviderConfiguration = $authenticationProviderConfiguration;
+        $this->securityContext = $securityContext;
+        $this->logger = $logger;
     }
 
     /**
