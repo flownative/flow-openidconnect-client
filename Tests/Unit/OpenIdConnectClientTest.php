@@ -182,7 +182,7 @@ class OpenIdConnectClientTest extends TestCase
         $clientId = 'the-client';
         $clientSecret = 'the-secret';
         $scope = 'some openid';
-        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $clientSecret, $scope, []);
+        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $clientSecret, $scope);
 
         $expectedAccessToken = new AccessToken([
             'access_token' => Algorithms::generateRandomToken(500),
