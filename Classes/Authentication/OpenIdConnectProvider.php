@@ -27,13 +27,13 @@ use Psr\Log\LoggerInterface;
 final class OpenIdConnectProvider extends AbstractProvider
 {
     /**
-     * @Flow\Inject
+     * @Flow\Inject(lazy = false)
      * @var Context
      */
     protected $securityContext;
 
     /**
-     * @Flow\Inject
+     * @Flow\Inject(lazy = false)
      * @var PolicyService
      */
     protected $policyService;
