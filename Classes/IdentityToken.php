@@ -2,7 +2,7 @@
 namespace Flownative\OpenIdConnect\Client;
 
 use JsonException;
-use Lcobucci\JWT\Parser;
+use Lcobucci\JWT\Configuration;
 use Lcobucci\JWT\Token;
 use phpseclib\Crypt\RSA;
 
@@ -95,9 +95,11 @@ class IdentityToken
             throw new \InvalidArgumentException('Failed decoding identity token from JWT.', 1559208043);
         }
 
-        $identityToken->values = $identityTokenArray;
-        $identityToken->parsedJwt = (new Parser())->parse($jwt);
+        // We don't use the JWT library for signing, so we don't need a full-blown configuration with secrets
+        $jwtConfiguration = Configuration::forUnsecuredSigner();
 
+        $identityToken->values = $identityTokenArray;
+        $identityToken->parsedJwt = $jwtConfiguration->parser()->parse($jwt);
         return $identityToken;
     }
 
@@ -113,9 +115,9 @@ class IdentityToken
      * Verify the signature (JWS) of this token using a given JWK
      *
      * @param array $jwks The JSON Web Keys to use for verification
-     * @see https://tools.ietf.org/html/rfc7517
      * @return bool
      * @throws ServiceException
+     * @see https://tools.ietf.org/html/rfc7517
      */
     public function hasValidSignature(array $jwks): bool
     {
@@ -194,7 +196,8 @@ class IdentityToken
      * @return array
      * @throws ServiceException
      */
-    private function getMatchingKeyForJws(array $keys, string $algorithm, ?string $keyIdentifier): array {
+    private function getMatchingKeyForJws(array $keys, string $algorithm, ?string $keyIdentifier): array
+    {
         foreach ($keys as $key) {
             if ($key['kty'] === 'RSA') {
                 if ($keyIdentifier === null || !isset($key['kid']) || $key['kid'] === $keyIdentifier) {
