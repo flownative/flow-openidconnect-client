@@ -105,7 +105,7 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
     /**
      * @return string
      */
-    public function getServiceType(): string
+    public static function getServiceType(): string
     {
         return self::SERVICE_TYPE;
     }
