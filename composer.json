@@ -22,7 +22,7 @@
     ],
     "require": {
         "neos/flow": "^6.0 || ^7.0",
-        "guzzlehttp/guzzle": "^6.3",
+        "guzzlehttp/guzzle": "^6.0 || ^7.0",
         "flownative/oauth2-client": "^4.0.0",
         "phpseclib/phpseclib": "^2.0.31",
         "lcobucci/jwt": "^4.1",
