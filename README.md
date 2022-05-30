@@ -537,6 +537,24 @@ claim.
                   …
 ```
 
+### Key Rotation and Revocation
+
+The key used by the identity provider for signing JWTs should be 
+rotated regularly. This plugin retrieves valid keys from the JWKs 
+endpoint which is configured through the discovery endpoint.
+
+The JWKs may contain multiple public keys. That way, existing and
+not yet expired JWTs are still valid.
+
+This plugin supports multiple keys and therefore keys can be
+rotated without further action. However, if you rotate keys
+multiple times in a short time frame or if you revoked an existing
+key, you should flush the respective cache (or all caches):
+
+```
+   ./flow flow:cache:flushone Flownative_OpenIdConnect_Client_JWKs
+``` 
+
 ## More about OpenID Connect
 
 See also:
