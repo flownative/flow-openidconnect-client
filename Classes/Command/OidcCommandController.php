@@ -2,7 +2,6 @@
 namespace Flownative\OpenIdConnect\Client\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
-use Flownative\OAuth2\Client\Authorization;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
@@ -33,13 +32,29 @@ final class OidcCommandController extends CommandController
     }
 
     /**
-     * Discover
+     * Discover OIDC configuration
      *
-     * @param string $serviceName
+     * This command connects with the /.well-known/openid-configuration endpoint of an OIDC
+     * service configured via Flow settings and retrieves information about endpoints,
+     * capabilities and further information. The retrieved data is displayed in a table.
+     *
+     * @param string|null $serviceName The service name, as it was configured via Flow settings
      * @return void
      */
-    public function discoverCommand(string $serviceName): void
+    public function discoverCommand(string $serviceName = null): void
     {
+        if (empty($this->settings['services'])) {
+            $this->outputLine('<error>There are no services configured in the Flow settings</error>');
+            exit(1);
+        }
+        if ($serviceName === null) {
+            if (count($this->settings['services']) > 1) {
+                $this->outputLine('<error>You must specify a service with --service-name, because multiple services are available</error>');
+                $this->outputLine('Use one of the following service names: ' . implode(', ', array_keys($this->settings['services'])));
+                exit(1);
+            }
+        }
+
         if (!isset($this->settings['services'][$serviceName])) {
             $this->outputLine('<error>Unknown service "%s".</error>', [$serviceName]);
             exit(1);
