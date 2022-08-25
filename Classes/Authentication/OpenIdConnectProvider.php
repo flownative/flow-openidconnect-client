@@ -115,7 +115,7 @@ final class OpenIdConnectProvider extends AbstractProvider
         }
 
         if (isset($this->options['audience']) && !$this->audienceMatches($this->options['audience'], $identityToken)) {
-            throw new AuthenticationException(sprintf('Open ID Connect: The identity token provided by the OIDC provider was not issued for this audience'), 1616568739);
+            throw new AuthenticationException('Open ID Connect: The identity token provided by the OIDC provider was not issued for this audience', 1616568739);
         }
 
         if (!isset($identityToken->values[$this->options['accountIdentifierTokenValueName']])) {
@@ -235,7 +235,7 @@ final class OpenIdConnectProvider extends AbstractProvider
                 foreach ($identityToken->values[$claim] as $roleIdentifier) {
                     if ($mapping !== null) {
                         if (!array_key_exists($roleIdentifier, $mapping)) {
-                            $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no corresponding mapping configured.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
+                            $this->logger->debug(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no corresponding mapping configured.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
                             continue;
                         }
                         $roleIdentifier = $mapping[$roleIdentifier];
@@ -243,7 +243,7 @@ final class OpenIdConnectProvider extends AbstractProvider
                     if ($this->policyService->hasRole($roleIdentifier)) {
                         $roleIdentifiers[] = $roleIdentifier;
                     } else {
-                        $this->logger->error(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
+                        $this->logger->debug(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
                     }
                 }
 
@@ -259,7 +259,6 @@ final class OpenIdConnectProvider extends AbstractProvider
                     $this->logger->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account "%s" (provider: %s) does not exist.', $identityToken->values['sub'] ?? '', $accountIdentifier, $this->name), LogEnvironment::fromMethodName(__METHOD__));
                 } else {
                     foreach ($existingAccount->getRoles() as $role) {
-                        /** @var Role $role */
                         $roleIdentifiers[] = $role->getIdentifier();
                     }
                     $this->logger->debug(sprintf('OpenID Connect: Added roles (identity token %s) from existing account "%s"', $identityToken->values['sub'] ?? '', $existingAccount->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
