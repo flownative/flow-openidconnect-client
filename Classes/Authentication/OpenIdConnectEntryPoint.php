@@ -17,7 +17,7 @@ use Psr\Log\LoggerInterface;
 final class OpenIdConnectEntryPoint extends AbstractEntryPoint
 {
     /**
-     * @Flow\Inject
+     * @Flow\Inject(name="Neos.Flow:SecurityLogger")
      * @var LoggerInterface
      */
     protected $logger;
