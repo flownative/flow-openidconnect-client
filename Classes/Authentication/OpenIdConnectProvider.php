@@ -39,7 +39,7 @@ final class OpenIdConnectProvider extends AbstractProvider
     protected $policyService;
 
     /**
-     * @Flow\Inject
+     * @Flow\Inject(name="Neos.Flow:SecurityLogger")
      * @var LoggerInterface
      */
     protected $logger;

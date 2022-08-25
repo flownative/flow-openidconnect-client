@@ -55,7 +55,7 @@ final class OpenIdConnectClient
     protected $httpClient;
 
     /**
-     * @Flow\Inject
+     * @Flow\Inject(name="Neos.Flow:SecurityLogger")
      * @var LoggerInterface
      */
     protected $logger;
