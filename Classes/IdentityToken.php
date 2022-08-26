@@ -4,7 +4,7 @@ namespace Flownative\OpenIdConnect\Client;
 use JsonException;
 use Lcobucci\JWT\Configuration;
 use Lcobucci\JWT\Token;
-use phpseclib\Crypt\RSA;
+use phpseclib3\Crypt\RSA;
 
 /**
  * Value object for an OpenID Connect identity token
