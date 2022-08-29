@@ -4,7 +4,9 @@ namespace Flownative\OpenIdConnect\Client;
 use JsonException;
 use Lcobucci\JWT\Configuration;
 use Lcobucci\JWT\Token;
+use phpseclib3\Crypt\PublicKeyLoader;
 use phpseclib3\Crypt\RSA;
+use phpseclib3\Math\BigInteger;
 
 /**
  * Value object for an OpenID Connect identity token
@@ -174,17 +176,13 @@ class IdentityToken
         if (!isset($jwk['n'], $jwk['e'])) {
             throw new \InvalidArgumentException('Failed verifying RSA JWT signature because of an invalid JSON Web Key.', 1559214667);
         }
-        $publicKeyXml = sprintf(
-            '<RSAKeyValue><Modulus>%s</Modulus><Exponent>%s</Exponent></RSAKeyValue>',
-            base64_encode(self::base64UrlDecode($jwk['n'])),
-            base64_encode(self::base64UrlDecode($jwk['e']))
-        );
-
-        $rsa = new RSA();
-        $rsa->setHash($hashType);
-        $rsa->signatureMode = RSA::SIGNATURE_PKCS1;
-        $rsa->loadKey($publicKeyXml, RSA::PUBLIC_FORMAT_XML);
-        return $rsa->verify($payload, $signature);
+        $key = PublicKeyLoader::load([
+            'e' => new BigInteger(self::base64UrlDecode($jwk['e']), 256),
+            'n' => new BigInteger(self::base64UrlDecode($jwk['n']), 256)
+        ])
+            ->withHash($hashType)
+            ->withPadding(RSA::SIGNATURE_PKCS1);
+        return $key->verify($payload, $signature);
     }
 
     /**
