@@ -93,7 +93,13 @@ final class OpenIdConnectProvider extends AbstractProvider
         try {
             $jwks = (new OpenIdConnectClient($this->options['serviceName']))->getJwks();
             $identityToken = $authenticationToken->extractIdentityTokenFromRequest($this->options['jwtCookieName']);
-            if (!$identityToken->hasValidSignature($jwks)) {
+
+            try {
+                $hasValidSignature = $identityToken->hasValidSignature($jwks);
+            } catch (ServiceException $exception) {
+                throw new SecurityException('Open ID Connect: ' . $exception->getMessage(), 1671105913, $exception);
+            }
+            if (!$hasValidSignature) {
                 throw new SecurityException('Open ID Connect: The identity token provided by the OIDC provider had an invalid signature', 1561479176);
             }
             $this->logger->debug(sprintf('OpenID Connect: Successfully verified signature of identity token with %s value "%s"', $this->options['accountIdentifierTokenValueName'], $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? 'unknown'), LogEnvironment::fromMethodName(__METHOD__));
