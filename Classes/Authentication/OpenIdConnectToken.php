@@ -72,7 +72,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
      */
     public function extractIdentityTokenFromRequest(string $cookieName): IdentityToken
     {
-        if ($this->authorizationHeader !== null) {
+        if ($this->authorizationHeader !== null && str_contains($this->authorizationHeader, 'Bearer ')) {
             $identityToken = $this->extractIdentityTokenFromAuthorizationHeader($this->authorizationHeader);
 
         } elseif (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
