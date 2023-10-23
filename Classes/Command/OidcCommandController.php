@@ -53,6 +53,7 @@ final class OidcCommandController extends CommandController
                 $this->outputLine('Use one of the following service names: ' . implode(', ', array_keys($this->settings['services'])));
                 exit(1);
             }
+            $serviceName = array_key_first($this->settings['services']);
         }
 
         if (!isset($this->settings['services'][$serviceName])) {
