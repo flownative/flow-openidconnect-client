@@ -22,7 +22,7 @@
     ],
     "require": {
         "php": "7.4.* || 8.0.* || 8.1.* || 8.2.*",
-        "neos/flow": "^6.0 || ^7.0 || ^8.0 || ^9.0",
+        "neos/flow": "^7.3 || ^8.0 || ^9.0",
         "guzzlehttp/guzzle": "^6.0 || ^7.0",
         "flownative/oauth2-client": "^4.0.0",
         "phpseclib/phpseclib": "^3.0.0",
