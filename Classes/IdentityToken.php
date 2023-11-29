@@ -2,7 +2,7 @@
 namespace Flownative\OpenIdConnect\Client;
 
 use JsonException;
-use Lcobucci\JWT\Configuration;
+use Lcobucci\JWT\Encoding\JoseEncoder;
 use Lcobucci\JWT\Token;
 use phpseclib3\Crypt\PublicKeyLoader;
 use phpseclib3\Crypt\RSA;
@@ -97,11 +97,10 @@ class IdentityToken
             throw new \InvalidArgumentException('Failed decoding identity token from JWT.', 1559208043);
         }
 
-        // We don't use the JWT library for signing, so we don't need a full-blown configuration with secrets
-        $jwtConfiguration = Configuration::forUnsecuredSigner();
+        $jwtParser = new Token\Parser(new JoseEncoder());
 
         $identityToken->values = $identityTokenArray;
-        $identityToken->parsedJwt = $jwtConfiguration->parser()->parse($jwt);
+        $identityToken->parsedJwt = $jwtParser->parse($jwt);
         return $identityToken;
     }
 
@@ -134,7 +133,7 @@ class IdentityToken
                     $this->payload,
                     $this->signature
                 );
-            break;
+                break;
             default:
                 throw new ServiceException(sprintf('Unsupported JWT signature type %s.', $this->header['alg']), 1559213623);
         }
