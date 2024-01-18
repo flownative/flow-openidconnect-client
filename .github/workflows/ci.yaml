@@ -20,30 +20,19 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-#          - windows-latest
 
         php-version:
-          - "7.3"
-          - "7.4"
-#          - "8.0"
+          - "8.0"
+          - "8.1"
+          - "8.2"
+          - "8.3"
 
         compiler:
           - default
 
         dependencies:
-#          - lowest
+          - lowest
           - highest
-
-#        include:
-#          - os: ubuntu-latest
-#            php-version: "8.0"
-#            compiler: jit
-#            dependencies: highest
-#
-#          - os: windows-latest
-#            php-version: "8.0"
-#            compiler: jit
-#            dependencies: highest
 
     steps:
       - name: Checkout
