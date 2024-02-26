@@ -90,9 +90,10 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (!isset($this->options['jwtCookieName'])) {
             $this->options['jwtCookieName'] = 'flownative_oidc_jwt';
         }
+
         try {
             $jwks = (new OpenIdConnectClient($this->options['serviceName']))->getJwks();
-            $identityToken = $authenticationToken->extractIdentityTokenFromRequest($this->options['jwtCookieName']);
+            list($identityToken, $accessToken) = $authenticationToken->extractTokensFromRequest($this->options['jwtCookieName']);
 
             try {
                 $hasValidSignature = $identityToken->hasValidSignature($jwks);
@@ -137,7 +138,7 @@ final class OpenIdConnectProvider extends AbstractProvider
 
         $this->logger->debug(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Roles: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), implode(', ', $this->getConfiguredRoles($identityToken))), LogEnvironment::fromMethodName(__METHOD__));
 
-        $this->emitAuthenticated($authenticationToken, $identityToken, $this->policyService->getRoles());
+        $this->emitAuthenticated($authenticationToken, $identityToken, $accessToken, $this->policyService->getRoles());
     }
 
     /**
@@ -155,7 +156,7 @@ final class OpenIdConnectProvider extends AbstractProvider
      * @return void
      * @Flow\Signal()
      */
-    public function emitAuthenticated(TokenInterface $authenticationToken, IdentityToken $identityToken, array $roles): void
+    public function emitAuthenticated(TokenInterface $authenticationToken, IdentityToken $identityToken, string $accessToken, array $roles): void
     {
     }
 

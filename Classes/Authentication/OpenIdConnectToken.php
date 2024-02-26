@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Flownative\OpenIdConnect\Client\ConnectionException;
@@ -74,7 +75,6 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     {
         if ($this->authorizationHeader !== null && str_contains($this->authorizationHeader, 'Bearer ')) {
             $identityToken = $this->extractIdentityTokenFromAuthorizationHeader($this->authorizationHeader);
-
         } elseif (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
             $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
             if (!isset($this->queryParameters[$authorizationIdQueryParameterName])) {
@@ -86,14 +86,13 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
                 $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
                 throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
             }
-
             $authorizationIdentifier = $this->queryParameters[$authorizationIdQueryParameterName];
             $client = new OpenIdConnectClient($tokenArguments[TokenArguments::SERVICE_NAME]);
 
             try {
                 $identityToken = $client->getIdentityToken($authorizationIdentifier);
                 $client->removeAuthorization($authorizationIdentifier);
-            } catch (ServiceException | ConnectionException $exception) {
+            } catch (ServiceException|ConnectionException $exception) {
                 throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s": %s', $authorizationIdentifier, $exception->getMessage()), 1560350413, $exception);
             }
         } else {
@@ -102,6 +101,52 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
         // NOTE: This token is not verified yet – signature and expiration time must be checked by code using this token
         return $identityToken;
+    }
+
+
+    /**
+     * Extract an identity token from either the query parameters of the current request (in case we
+     * just return from an authentication redirect) or from a given JWT cookie (for subsequent requests).
+     *
+     * @param string $cookieName Name of the cookie the token is stored in
+     * @return IdentityToken A syntactically valid but not verified (signature, expiration) token
+     * @throws AccessDeniedException
+     * @throws AuthenticationRequiredException
+     * @throws InvalidAuthenticationStatusException
+     */
+    public function extractTokensFromRequest(string $cookieName): array
+    {
+        $accessToken = '';
+
+        if ($this->authorizationHeader !== null && str_contains($this->authorizationHeader, 'Bearer ')) {
+            $identityToken = $this->extractIdentityTokenFromAuthorizationHeader($this->authorizationHeader);
+        } elseif (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
+            $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
+            if (!isset($this->queryParameters[$authorizationIdQueryParameterName])) {
+                throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', $authorizationIdQueryParameterName), 1560350311);
+            }
+            try {
+                $tokenArguments = TokenArguments::fromSignedString($this->queryParameters[self::OIDC_PARAMETER_NAME]);
+            } catch (\InvalidArgumentException $exception) {
+                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
+                throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
+            }
+            $authorizationIdentifier = $this->queryParameters[$authorizationIdQueryParameterName];
+            $client = new OpenIdConnectClient($tokenArguments[TokenArguments::SERVICE_NAME]);
+
+            try {
+                $identityToken = $client->getIdentityToken($authorizationIdentifier);
+                $accessToken = $client->getAuthorization($authorizationIdentifier)->getAccessToken()->getToken();
+                $client->removeAuthorization($authorizationIdentifier);
+            } catch (ServiceException|ConnectionException $exception) {
+                throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s": %s', $authorizationIdentifier, $exception->getMessage()), 1560350413, $exception);
+            }
+        } else {
+            $identityToken = $this->extractIdentityTokenFromCookie($cookieName);
+        }
+
+        // NOTE: This token is not verified yet – signature and expiration time must be checked by code using this token
+        return [$identityToken, $accessToken];
     }
 
     /**

@@ -242,11 +242,13 @@ final class OpenIdConnectClient
         if (!$authorization instanceof Authorization) {
             throw new ServiceException(sprintf('OpenID Connect Client: Authorization %s was not found', $authorizationIdentifier), 1567853403);
         }
+
         $accessToken = $authorization->getAccessToken();
         if (!$accessToken) {
             throw new ServiceException(sprintf('OpenID Connect Client: Authorization %s contained no access token', $authorizationIdentifier), 1567853441);
         }
         $tokenValues = $accessToken->getValues();
+
         if (!isset($tokenValues['id_token'])) {
             throw new ServiceException('OpenID Connect Client: No id_token found in values of current oAuth token', 1559208674);
         }
@@ -335,7 +337,7 @@ final class OpenIdConnectClient
      * @return Authorization|null
      * @throws ConnectionException
      */
-    private function getAuthorization(string $authorizationIdentifier): ?Authorization
+    public function getAuthorization(string $authorizationIdentifier): ?Authorization
     {
         try {
             $authorization = $this->oAuthClient->getAuthorization($authorizationIdentifier);
