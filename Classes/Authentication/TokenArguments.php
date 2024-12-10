@@ -41,12 +41,12 @@ final class TokenArguments implements \ArrayAccess
         try {
             $payloadAsString = $returnArguments->hashService->validateAndStripHmac(base64_decode($encodedString));
             $returnArguments->payload = json_decode($payloadAsString, true);
-        } catch (InvalidHashException $exception) {
-            throw new \InvalidArgumentException(sprintf('OpenID Connect: The token arguments were appended by an invalid HMAC'), 1560165515);
+        } catch (InvalidHashException) {
+            throw new \InvalidArgumentException('OpenID Connect: The token arguments were appended by an invalid HMAC', 1560165515);
         }
 
         if (!is_array($returnArguments->payload)) {
-            throw new \InvalidArgumentException(sprintf('OpenID Connect: Failed decoding token arguments payload from given string'), 1560162452);
+            throw new \InvalidArgumentException('OpenID Connect: Failed decoding token arguments payload from given string', 1560162452);
         }
         return $returnArguments;
     }
@@ -78,11 +78,9 @@ final class TokenArguments implements \ArrayAccess
      * @param mixed $offset
      * @return mixed
      */
-    public function offsetGet($offset)
+    public function offsetGet($offset): mixed
     {
-        if (isset($this->payload[$offset])) {
-            return $this->payload[$offset];
-        }
+        return $this->payload[$offset] ?? null;
     }
 
     /**
@@ -91,14 +89,10 @@ final class TokenArguments implements \ArrayAccess
      */
     public function offsetSet($offset, $value): void
     {
-        switch($offset) {
-            case self::AUTHORIZATION_ID:
-            case self::SERVICE_NAME:
-                $this->payload[$offset] = $value;
-            break;
-            default:
-                throw new \InvalidArgumentException(sprintf('OpenID Connect: Invalid argument name "%s" for token arguments', $offset), 1560162220);
-        }
+        $this->payload[$offset] = match ($offset) {
+            self::AUTHORIZATION_ID, self::SERVICE_NAME => $value,
+            default => throw new \InvalidArgumentException(sprintf('OpenID Connect: Invalid argument name "%s" for token arguments', $offset), 1560162220),
+        };
     }
 
     /**

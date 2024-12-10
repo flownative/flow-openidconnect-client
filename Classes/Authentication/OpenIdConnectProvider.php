@@ -79,10 +79,10 @@ final class OpenIdConnectProvider extends AbstractProvider
             throw new UnsupportedAuthenticationTokenException(sprintf('The OpenID Connect authentication provider cannot authenticate the given token of type %s.', get_class($authenticationToken)), 1559805996);
         }
         if (!isset($this->options['roles']) && !isset($this->options['rolesFromClaims']) && !isset($this->options['addRolesFromExistingAccount'])) {
-            throw new \RuntimeException(sprintf('Either "roles", "rolesFromClaims" or "addRolesFromExistingAccount" must be specified in the configuration of OpenID Connect authentication provider'), 1559806095);
+            throw new \RuntimeException('Either "roles", "rolesFromClaims" or "addRolesFromExistingAccount" must be specified in the configuration of OpenID Connect authentication provider', 1559806095);
         }
         if (!isset($this->options['serviceName'])) {
-            throw new \RuntimeException(sprintf('Missing "serviceName" option in the configuration of OpenID Connect authentication provider'), 1561480057);
+            throw new \RuntimeException('Missing "serviceName" option in the configuration of OpenID Connect authentication provider', 1561480057);
         }
         if (!isset($this->options['accountIdentifierTokenValueName'])) {
             $this->options['accountIdentifierTokenValueName'] = 'sub';
@@ -103,7 +103,7 @@ final class OpenIdConnectProvider extends AbstractProvider
                 throw new SecurityException('Open ID Connect: The identity token provided by the OIDC provider had an invalid signature', 1561479176);
             }
             $this->logger->debug(sprintf('OpenID Connect: Successfully verified signature of identity token with %s value "%s"', $this->options['accountIdentifierTokenValueName'], $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? 'unknown'), LogEnvironment::fromMethodName(__METHOD__));
-        } catch (SecurityException\AuthenticationRequiredException $exception) {
+        } catch (SecurityException\AuthenticationRequiredException) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
             return;
         } catch (SecurityException $exception) {
@@ -261,13 +261,13 @@ final class OpenIdConnectProvider extends AbstractProvider
                 $this->logger->error(sprintf('OpenID Connect: Failed using account identifier from from identity token (%s) because the configured claim "%s" does not exist.', $identityToken->values['sub'] ?? '', $this->options['accountIdentifierTokenValueName']), LogEnvironment::fromMethodName(__METHOD__));
             } else {
                 $existingAccount = $this->accountRepository->findActiveByAccountIdentifierAndAuthenticationProviderName($accountIdentifier, $this->name);
-                if (!$existingAccount instanceof Account) {
-                    $this->logger->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account "%s" (provider: %s) does not exist.', $identityToken->values['sub'] ?? '', $accountIdentifier, $this->name), LogEnvironment::fromMethodName(__METHOD__));
-                } else {
+                if ($existingAccount instanceof Account) {
                     foreach ($existingAccount->getRoles() as $role) {
                         $roleIdentifiers[] = $role->getIdentifier();
                     }
                     $this->logger->debug(sprintf('OpenID Connect: Added roles (identity token %s) from existing account "%s"', $identityToken->values['sub'] ?? '', $existingAccount->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
+                } else {
+                    $this->logger->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account "%s" (provider: %s) does not exist.', $identityToken->values['sub'] ?? '', $accountIdentifier, $this->name), LogEnvironment::fromMethodName(__METHOD__));
                 }
             }
         }

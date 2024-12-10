@@ -56,7 +56,7 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
     {
         $this->initializeOptionsIfNeeded();
         if (!isset($this->options['issuer'])) {
-            throw new ConfigurationException(sprintf('Missing configuration issuer for service "%s" (%s). Either configure it explicitly via settings or make sure that auto-discovery returns "issuer".', $this->getServiceName(), $this->getServiceType()), 1559028091);
+            throw new ConfigurationException(sprintf('Missing configuration issuer for service "%s" (%s). Either configure it explicitly via settings or make sure that auto-discovery returns "issuer".', $this->getServiceName(), self::getServiceType()), 1559028091);
         }
         return $this->options['issuer'];
     }
@@ -71,7 +71,7 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
     {
         $this->initializeOptionsIfNeeded();
         if (!isset($this->options['authorizationEndpoint']) || !is_string($this->options['authorizationEndpoint'])) {
-            throw new ConfigurationException(sprintf('Missing configuration authorizationEndpoint for service "%s" (%s). Either configure it explicitly via settings or make sure that auto-discovery returns "authorization_endpoint".', $this->getServiceName(), $this->getServiceType()), 1558612617);
+            throw new ConfigurationException(sprintf('Missing configuration authorizationEndpoint for service "%s" (%s). Either configure it explicitly via settings or make sure that auto-discovery returns "authorization_endpoint".', $this->getServiceName(), self::getServiceType()), 1558612617);
         }
         return $this->options['authorizationEndpoint'];
     }
@@ -86,7 +86,7 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
     {
         $this->initializeOptionsIfNeeded();
         if (!isset($this->options['tokenEndpoint']) || !is_string($this->options['tokenEndpoint'])) {
-            throw new ConfigurationException(sprintf('Missing configuration tokenEndpoint for service "%s" (%s). Either configure it explicitly via settings or make sure that auto-discovery returns "token_endpoint".', $this->getServiceName(), $this->getServiceType()), 1558615098);
+            throw new ConfigurationException(sprintf('Missing configuration tokenEndpoint for service "%s" (%s). Either configure it explicitly via settings or make sure that auto-discovery returns "token_endpoint".', $this->getServiceName(), self::getServiceType()), 1558615098);
         }
         return $this->options['tokenEndpoint'];
     }
