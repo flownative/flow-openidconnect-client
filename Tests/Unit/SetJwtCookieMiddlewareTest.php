@@ -100,7 +100,7 @@ class SetJwtCookieMiddlewareTest extends TestCase
         self::assertSame($response, $this->mockOriginalResponse);
     }
 
-    public function removeJwtCookieDataProvider(): array
+    public static function removeJwtCookieDataProvider(): array
     {
         return [
             'no authenticated tokens' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => [], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => null],
@@ -129,7 +129,7 @@ class SetJwtCookieMiddlewareTest extends TestCase
      * @test
      * @dataProvider removeJwtCookieDataProvider
      */
-    public function removeJwtCookieTests(array $options, array $authenticationProviderConfiguration, array $authenticatedTokens, array $activeCookies, string $expectedCookieHeader = null): void
+    public function removeJwtCookieTests(array $options, array $authenticationProviderConfiguration, array $authenticatedTokens, array $activeCookies, ?string $expectedCookieHeader = null): void
     {
         $middleware = $this->getMiddleware($options, $authenticationProviderConfiguration);
         $this->mockSecurityContext->method('isInitialized')->willReturn(true);
@@ -151,7 +151,7 @@ class SetJwtCookieMiddlewareTest extends TestCase
         }
     }
 
-    public function setJwtCookieDataProvider(): array
+    public static function setJwtCookieDataProvider(): array
     {
         return [
             'no authenticated tokens' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => [], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => null],
@@ -180,7 +180,7 @@ class SetJwtCookieMiddlewareTest extends TestCase
      * @test
      * @dataProvider setJwtCookieDataProvider
      */
-    public function setJwtCookieTests(array $options, array $authenticationProviderConfiguration, array $authenticatedTokens, array $activeCookies, string $expectedCookieHeader = null): void
+    public function setJwtCookieTests(array $options, array $authenticationProviderConfiguration, array $authenticatedTokens, array $activeCookies, ?string $expectedCookieHeader = null): void
     {
         $middleware = $this->getMiddleware($options, $authenticationProviderConfiguration);
         $this->mockSecurityContext->method('isInitialized')->willReturn(true);
@@ -226,7 +226,7 @@ class SetJwtCookieMiddlewareTest extends TestCase
         self::assertFalse($response->hasHeader('Set-Cookie'));
     }
 
-    public function removeOidcQueryParametersDataProvider(): array
+    public static function removeOidcQueryParametersDataProvider(): array
     {
         return [
             ['requestUri' => 'http://localhost', 'expectedLocationHeader' => null],
@@ -244,7 +244,7 @@ class SetJwtCookieMiddlewareTest extends TestCase
      * @test
      * @dataProvider removeOidcQueryParametersDataProvider
      */
-    public function removeOidcQueryParametersTests(string $requestUri, string $expectedLocationHeader = null): void
+    public function removeOidcQueryParametersTests(string $requestUri, ?string $expectedLocationHeader = null): void
     {
         $middleware = $this->getMiddleware();
         $this->mockSecurityContext->method('isInitialized')->willReturn(true);
