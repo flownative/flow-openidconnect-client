@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
 
 jobs:
   tests:
@@ -22,7 +22,6 @@ jobs:
           - ubuntu-latest
 
         php-version:
-          - "8.0"
           - "8.1"
           - "8.2"
           - "8.3"
@@ -36,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Override PHP ini values for JIT compiler
         if: matrix.compiler == 'jit'
@@ -59,12 +58,13 @@ jobs:
         run: echo "COMPOSER_CACHE_DIR=~\AppData\Local\Composer" >> $GITHUB_ENV
 
       - name: Cache dependencies installed with composer
-        uses: actions/cache@v1
+        uses: actions/cache@v4
         with:
           path: ${{ env.COMPOSER_CACHE_DIR }}
           key: php${{ matrix.php-version }}-composer-${{ matrix.dependencies }}-${{ hashFiles('**/composer.json') }}
           restore-keys: |
             php${{ matrix.php-version }}-composer-${{ matrix.dependencies }}-
+
       - name: Install lowest dependencies with composer
         if: matrix.dependencies == 'lowest'
         run: composer update --no-ansi --no-interaction --no-progress --prefer-lowest
@@ -80,6 +80,6 @@ jobs:
         run: vendor/bin/phpunit --coverage-clover=coverage.xml
 
       - name: Send code coverage report to Codecov.io
-        uses: codecov/codecov-action@v1
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
