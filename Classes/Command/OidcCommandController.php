@@ -74,7 +74,7 @@ final class OidcCommandController extends CommandController
             exit(1);
         }
 
-        $discoveredOptions = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
+        $discoveredOptions = json_decode($response->getBody()->getContents(), true);
         if (!is_array($discoveredOptions)) {
             $this->outputLine('<error>Discovery endpoint returned invalid response</error>');
             exit(1);

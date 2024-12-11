@@ -105,14 +105,14 @@ class OpenIdConnectClientTest extends TestCase
         $expectedJwks = json_decode($this->exampleJwksJson, true, 512, JSON_THROW_ON_ERROR);
         $cacheEntryIdentifier = sha1($this->settings['services']['test']['options']['jwksUri']);
 
-        $mockHttpClient->expects($this->once())->method('request')->with('GET', $this->settings['services']['test']['options']['jwksUri'])->willReturn($mockHttpResponse);
-        $mockHttpResponse->expects($this->once())->method('getBody')->willReturn($mockHttpBody);
-        $mockHttpBody->expects($this->once())->method('getContents')->willReturn(json_encode(['keys' => json_decode($this->exampleJwksJson, true, 512, JSON_THROW_ON_ERROR)], JSON_THROW_ON_ERROR, 512));
+        $mockHttpClient->expects(static::once())->method('request')->with('GET', $this->settings['services']['test']['options']['jwksUri'])->willReturn($mockHttpResponse);
+        $mockHttpResponse->expects(static::once())->method('getBody')->willReturn($mockHttpBody);
+        $mockHttpBody->expects(static::once())->method('getContents')->willReturn(json_encode(['keys' => json_decode($this->exampleJwksJson, true, 512, JSON_THROW_ON_ERROR)], JSON_THROW_ON_ERROR, 512));
 
         $actualJwks = $this->oidcClient->getJwks();
 
-        $this->assertSame($expectedJwks, $actualJwks);
-        $this->assertSame($expectedJwks, $this->jwksCache->get($cacheEntryIdentifier));
+        static::assertSame($expectedJwks, $actualJwks);
+        static::assertSame($expectedJwks, $this->jwksCache->get($cacheEntryIdentifier));
     }
 
     /**
@@ -128,7 +128,7 @@ class OpenIdConnectClientTest extends TestCase
         $this->inject($this->oidcClient, 'httpClient', $mockHttpClient);
         $this->oidcClient->initializeObject();
 
-        $mockHttpClient->expects($this->once())->method('request')->willThrowException(new ConnectException('Something wrong', $mockHttpRequest));
+        $mockHttpClient->expects(static::once())->method('request')->willThrowException(new ConnectException('Something wrong', $mockHttpRequest));
 
         $this->expectExceptionCode(1559211266);
         $this->oidcClient->getJwks();
@@ -148,9 +148,9 @@ class OpenIdConnectClientTest extends TestCase
         $this->inject($this->oidcClient, 'httpClient', $mockHttpClient);
         $this->oidcClient->initializeObject();
 
-        $mockHttpClient->expects($this->once())->method('request')->with('GET', $this->settings['services']['test']['options']['jwksUri'])->willReturn($mockHttpResponse);
-        $mockHttpResponse->expects($this->once())->method('getBody')->willReturn($mockHttpBody);
-        $mockHttpBody->expects($this->once())->method('getContents')->willReturn(json_encode(['something invalid' => json_decode($this->exampleJwksJson, true, 512, JSON_THROW_ON_ERROR)], JSON_THROW_ON_ERROR, 512));
+        $mockHttpClient->expects(static::once())->method('request')->with('GET', $this->settings['services']['test']['options']['jwksUri'])->willReturn($mockHttpResponse);
+        $mockHttpResponse->expects(static::once())->method('getBody')->willReturn($mockHttpBody);
+        $mockHttpBody->expects(static::once())->method('getContents')->willReturn(json_encode(['something invalid' => json_decode($this->exampleJwksJson, true, 512, JSON_THROW_ON_ERROR)], JSON_THROW_ON_ERROR, 512));
 
         $this->expectExceptionCode(1559211340);
         $this->oidcClient->getJwks();
@@ -169,7 +169,7 @@ class OpenIdConnectClientTest extends TestCase
         $cacheEntryIdentifier = sha1($this->settings['services']['test']['options']['jwksUri']);
         $this->jwksCache->set($cacheEntryIdentifier, $expectedJwks);
 
-        $this->assertSame($expectedJwks, $this->oidcClient->getJwks());
+        static::assertSame($expectedJwks, $this->oidcClient->getJwks());
     }
 
     /**
@@ -196,8 +196,8 @@ class OpenIdConnectClientTest extends TestCase
 
         $actualAccessToken = $this->oidcClient->getAccessToken($serviceName, $clientId, $clientSecret, $scope);
 
-        $this->assertSame($expectedAccessToken->getToken(), $actualAccessToken->getToken());
-        $this->assertSame($expectedAccessToken->getExpires(), $actualAccessToken->getExpires());
+        static::assertSame($expectedAccessToken->getToken(), $actualAccessToken->getToken());
+        static::assertSame($expectedAccessToken->getExpires(), $actualAccessToken->getExpires());
     }
 
     /**

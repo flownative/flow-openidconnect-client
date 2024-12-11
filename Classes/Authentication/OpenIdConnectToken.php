@@ -111,13 +111,13 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
      */
     private function extractIdentityTokenFromAuthorizationHeader(string $authorizationHeader): IdentityToken
     {
-        if (strpos($this->authorizationHeader, 'Bearer ') !== 0) {
+        if (!str_starts_with($authorizationHeader, 'Bearer ')) {
             $this->setAuthenticationStatus(TokenInterface::NO_CREDENTIALS_GIVEN);
             throw new AuthenticationRequiredException('Could not extract access token from Authorization header: "Bearer" keyword is missing', 1589283608);
         }
 
         try {
-            $jwt = substr($this->authorizationHeader, strlen('Bearer '));
+            $jwt = substr($authorizationHeader, strlen('Bearer '));
             $identityToken = IdentityToken::fromJwt($jwt);
         } catch (\InvalidArgumentException $exception) {
             $this->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);

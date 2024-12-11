@@ -4,6 +4,7 @@ namespace Flownative\OpenIdConnect\Client;
 use JsonException;
 use Lcobucci\JWT\Encoding\JoseEncoder;
 use Lcobucci\JWT\Token;
+use Neos\Utility\Arrays;
 use phpseclib3\Crypt\PublicKeyLoader;
 use phpseclib3\Crypt\RSA;
 use phpseclib3\Math\BigInteger;
@@ -157,7 +158,7 @@ class IdentityToken
      */
     public function scopeContains(string $scopeIdentifier): bool
     {
-        $scopeIdentifiers = \Neos\Utility\Arrays::trimExplode(',', $this->values['scope'] ?? '');
+        $scopeIdentifiers = Arrays::trimExplode(',', $this->values['scope'] ?? '');
         return in_array($scopeIdentifier, $scopeIdentifiers, true);
     }
 
@@ -200,7 +201,7 @@ class IdentityToken
                 if ($keyIdentifier === null || !isset($key['kid']) || $key['kid'] === $keyIdentifier) {
                     return $key;
                 }
-            } else if (isset($key['alg']) && $key['alg'] === $algorithm && $key['kid'] === $keyIdentifier) {
+            } elseif (isset($key['alg']) && $key['alg'] === $algorithm && $key['kid'] === $keyIdentifier) {
                 return $key;
             }
         }

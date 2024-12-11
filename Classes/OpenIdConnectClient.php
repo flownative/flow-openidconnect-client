@@ -216,7 +216,7 @@ final class OpenIdConnectClient
     public function startAuthorization(UriInterface $returnToUri, string $scope): UriInterface
     {
         $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $this->serviceName]);
-        if (strpos($returnArguments, 'ERROR') === 0) {
+        if (str_starts_with($returnArguments, 'ERROR')) {
             throw new \RuntimeException(substr($returnArguments, 6));
         }
         $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
@@ -288,7 +288,7 @@ final class OpenIdConnectClient
                 throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
             }
 
-            $response = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
+            $response = json_decode($response->getBody()->getContents(), true);
             if (!is_array($response) || !isset($response['keys'])) {
                 throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
             }
@@ -315,7 +315,7 @@ final class OpenIdConnectClient
             }
             $discoveredOptions = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
             if (!is_array($discoveredOptions)) {
-                throw new ConnectionException(sprintf('OpenID Connect Client: Discovery endpoint returned invalid response.'), 1554903349);
+                throw new ConnectionException('OpenID Connect Client: Discovery endpoint returned invalid response.', 1554903349);
             }
             $this->discoveryCache->set($cacheIdentifier, $discoveredOptions);
             $this->logger->info(sprintf('OpenID Connect Client: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri), LogEnvironment::fromMethodName(__METHOD__));
