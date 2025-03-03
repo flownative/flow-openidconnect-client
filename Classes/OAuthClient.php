@@ -79,10 +79,14 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
         return $this->options['tokenEndpoint'];
     }
 
+    /**
+     * @throws ConfigurationException
+     */
     public function getClientId(): string
     {
         $this->initializeOptionsIfNeeded();
         if (!isset($this->options['clientId'])) {
+            throw new ConfigurationException(sprintf('Missing configuration clientId for service "%s" (%s). Configure it explicitly via settings.', $this->getServiceName(), self::getServiceType()), 1739990068);
         }
         return $this->options['clientId'];
     }

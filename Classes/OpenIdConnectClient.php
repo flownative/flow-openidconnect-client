@@ -278,9 +278,13 @@ final class OpenIdConnectClient
                 throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
             }
 
-            $response = json_decode($response->getBody()->getContents(), true);
+            try {
+                $response = json_decode($response->getBody()->getContents(), true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $e) {
+                throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1739990452, $e);
+            }
             if (!is_array($response) || !isset($response['keys'])) {
-                throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
+                throw new ServiceException(sprintf('OpenID Connect Client: Invalid response data while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
             }
             $jwks = $response['keys'];
             $this->jwksCache->set($cacheIdentifier, $jwks);
