@@ -30,26 +30,16 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
      */
     protected $flowBaseUriSetting;
 
-    /**
-     * @var array
-     */
-    private $options = [];
+    private array $options = [];
 
-    /**
-     * @var OpenIdConnectClient
-     */
-    private $openIdConnectClient;
+    private ?OpenIdConnectClient $openIdConnectClient = null;
 
-    /**
-     * @param OpenIdConnectClient $openIdConnectClient
-     */
     public function setOpenIdConnectClient(OpenIdConnectClient $openIdConnectClient): void
     {
         $this->openIdConnectClient = $openIdConnectClient;
     }
 
     /**
-     * @return string
      * @throws ConfigurationException
      */
     public function getBaseUri(): string
@@ -64,7 +54,6 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
     /**
      * Returns the OAuth service endpoint for authorizing a token.
      *
-     * @return string
      * @throws ConfigurationException
      */
     public function getAuthorizeTokenUri(): string
@@ -77,9 +66,8 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
     }
 
     /**
-     * Returns the OAuth service endpoint for the access token.
+     * Returns the OAuth service endpoint for token management.
      *
-     * @return string
      * @throws ConfigurationException
      */
     public function getAccessTokenUri(): string
@@ -91,9 +79,6 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
         return $this->options['tokenEndpoint'];
     }
 
-    /**
-     * @return string
-     */
     public function getClientId(): string
     {
         $this->initializeOptionsIfNeeded();
@@ -102,23 +87,17 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
         return $this->options['clientId'];
     }
 
-    /**
-     * @return string
-     */
     public static function getServiceType(): string
     {
         return self::SERVICE_TYPE;
     }
 
-    /**
-     * @return void
-     */
     private function initializeOptionsIfNeeded(): void
     {
         if ($this->options !== []) {
             return;
         }
-        if (!$this->openIdConnectClient) {
+        if ($this->openIdConnectClient === null) {
             $this->openIdConnectClient = new OpenIdConnectClient($this->getServiceName());
         }
         $this->options = $this->openIdConnectClient->getOptions();

@@ -35,7 +35,6 @@ A few feature highlights of this package:
 - mapping of Flow user roles from claims
 - automatic JWT signature verification
 - authentication via bearer access token
-- automatic refresh of expired access tokens
 - easy access to ID tokens through the Flow account model
 - command line support for testing
 
@@ -103,7 +102,7 @@ identifier.
 In order to use this plugin you need:
 
 - an OIDC Identity Provider which provides auto discovery
-- an application (such as Neos), based on Flow 6.0 or higher
+- an application (such as Neos), based on Flow 7.3 or higher
 
 ## Installation
 
@@ -132,6 +131,8 @@ What you need is:
 You will use the
 [Authorization Code Grant](https://tools.ietf.org/html/rfc6749#section-4.1)
 for this type of application.
+
+Note: A shortcut for this setup is the [Flownative.OpenidConnect.Neos](https://github.com/flownative/openidconnect-neos) package.
 
 ### Authenticate applications
 
@@ -295,6 +296,8 @@ Neos:
 Without further programming you need to manually create a Neos user
 which has the same username as the one provided in the "sub" claim by
 the OIDC identity provider.
+
+Note: Check the [Flownative.OpenidConnect.Neos](https://github.com/flownative/openidconnect-neos) package for a working implementation.
 
 ## Client Credentials Grant
 
@@ -561,66 +564,6 @@ See also:
 
 https://openid.net/specs/openid-connect-basic-1_0.html
 https://connect2id.com/learn/openid-connect
-
-## Example Configuration for Neos CMS
-
-With the following configuration, you can use OIDC for authentication of
-Neos CMS backend users. OIDC is only used for authentication (not
-authorization). For this to work, the identity token must provide the
-user's email address via the token value "email" and a Neos user with
-this email address (as username) must exist.
-
-```yaml
-Flownative:
-  OpenIdConnect:
-    Client:
-      services:
-        neos:
-          options:
-            discoveryUri: '%env:OIDC_DISCOVERY_URI%'
-            clientId: '%env:OIDC_CLIENT_ID%'
-            clientSecret: '%env:OIDC_CLIENT_SECRET%'
-            additionalParameters:
-              audience: '%env:OIDC_AUDIENCE%'
-
-      middleware:
-        authenticationProviderName: 'Neos.Neos:Backend'
-
-Neos:
-  Flow:
-    security:
-      authentication:
-        providers:
-          'Neos.Neos:Backend':
-            label: 'OpenID Connect'
-            provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
-
-            requestPatterns:
-              'Neos.Neos:BackendControllers':
-                pattern: 'ControllerObjectName'
-                patternOptions:
-                  controllerObjectNamePattern: 'Neos\Neos\Controller\.*'
-              'Neos.Neos:ServiceControllers':
-                pattern: 'ControllerObjectName'
-                patternOptions:
-                  controllerObjectNamePattern: 'Neos\Neos\Service\.*'
-
-            providerOptions:
-              addRolesFromExistingAccount: true
-              accountIdentifierTokenValueName: 'email'
-              jwtCookieName: 'flownative_oidc_jwt'
-              serviceName: 'neos'
-            token: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken'
-            entryPoint: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectEntryPoint'
-            entryPointOptions:
-              serviceName: 'neos'
-              scope: 'profile email'
-
-        authenticationStrategy: oneToken
-    session:
-      inactivityTimeout: 14400
-
-```
 
 ## Credits and Support
 

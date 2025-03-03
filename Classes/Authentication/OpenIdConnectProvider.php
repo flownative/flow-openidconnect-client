@@ -10,6 +10,7 @@ use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Cache\Exception as CacheException;
 use Neos\Flow\Annotations as Flow;
+use Neos\Flow\Configuration\Exception\InvalidConfigurationTypeException;
 use Neos\Flow\Log\Utility\LogEnvironment;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\AccountRepository;
@@ -45,11 +46,6 @@ final class OpenIdConnectProvider extends AbstractProvider
     protected $logger;
 
     /**
-     * @var array
-     */
-    protected $options = [];
-
-    /**
      * @Flow\Inject
      * @var AccountRepository
      */
@@ -66,12 +62,14 @@ final class OpenIdConnectProvider extends AbstractProvider
     /**
      * @param TokenInterface $authenticationToken
      * @throws AuthenticationException
+     * @throws CacheException
      * @throws ConnectionException
      * @throws InvalidAuthenticationStatusException
      * @throws NoSuchRoleException
+     * @throws SecurityException
      * @throws ServiceException
      * @throws UnsupportedAuthenticationTokenException
-     * @throws CacheException
+     * @throws InvalidConfigurationTypeException
      */
     public function authenticate(TokenInterface $authenticationToken): void
     {

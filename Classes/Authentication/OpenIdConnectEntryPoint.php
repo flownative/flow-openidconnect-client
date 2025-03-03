@@ -23,9 +23,6 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
     protected $logger;
 
     /**
-     * @param ServerRequestInterface $request
-     * @param ResponseInterface $response
-     * @return ResponseInterface
      * @throws ConfigurationException
      */
     public function startAuthentication(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
@@ -64,10 +61,6 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         }
     }
 
-    /**
-     * @param ServerRequestInterface $request
-     * @return bool
-     */
     private function hasAuthorizationHeader(ServerRequestInterface $request): bool
     {
         $authorizationHeader = null;

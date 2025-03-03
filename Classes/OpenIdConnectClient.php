@@ -3,7 +3,7 @@
 namespace Flownative\OpenIdConnect\Client;
 
 use Doctrine\ORM\OptimisticLockException;
-use Doctrine\ORM\ORMException;
+use Doctrine\ORM\Exception\ORMException;
 use Flownative\OAuth2\Client\Authorization;
 use Flownative\OAuth2\Client\OAuthClientException;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
@@ -155,14 +155,12 @@ final class OpenIdConnectClient
      * is deterministic and derived from the service name, client id, client secret and scope.
      *
      * @param string $serviceName The service name used in the OAuth configuration
-     * @param string $clientId Client ID
-     * @param string $clientSecret Client Secret
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
      * @param array $additionalParameters Additional parameters to provide in the request body while requesting the token. For example ['audience' => 'https://www.example.com/api/v1']
-     * @return AccessToken
      * @throws AuthenticationException
      * @throws ConnectionException
      * @throws IdentityProviderException
+     * @throws GuzzleException
      */
     public function getAccessToken(string $serviceName, string $clientId, string $clientSecret, string $scope, array $additionalParameters = []): AccessToken
     {
@@ -208,9 +206,7 @@ final class OpenIdConnectClient
      *
      * This method is an interactive authorization, which usually requires a browser to work.
      *
-     * @param UriInterface $returnToUri The desired return URI
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
-     * @return UriInterface The rendered URI to redirect to
      * @throws OAuthClientException
      */
     public function startAuthorization(UriInterface $returnToUri, string $scope): UriInterface
@@ -231,10 +227,8 @@ final class OpenIdConnectClient
     /**
      * Returns the current OpenId Connect Identity Token
      *
-     * @param string $authorizationIdentifier
-     * @return IdentityToken
      * @throws ConnectionException
-     * @throws ServiceException
+     * @throws ServiceException|\SodiumException
      */
     public function getIdentityToken(string $authorizationIdentifier): IdentityToken
     {
@@ -259,9 +253,6 @@ final class OpenIdConnectClient
 
     /**
      * Removes the specified authorization, so that it can't be used again
-     *
-     * @param string $authorizationIdentifier
-     * @return void
      */
     public function removeAuthorization(string $authorizationIdentifier): void
     {
@@ -271,7 +262,6 @@ final class OpenIdConnectClient
     /**
      * Retrieves the JSON Web Key Set from the endpoint configured via the "jwksUri" option
      *
-     * @return array
      * @throws CacheException
      * @throws ConnectionException
      * @throws ServiceException
@@ -299,7 +289,6 @@ final class OpenIdConnectClient
     }
 
     /**
-     * @param string $discoveryUri
      * @throws ConnectionException
      * @throws CacheException
      */
@@ -331,8 +320,6 @@ final class OpenIdConnectClient
     /**
      * Returns the specified authorization
      *
-     * @param string $authorizationIdentifier
-     * @return Authorization|null
      * @throws ConnectionException
      */
     private function getAuthorization(string $authorizationIdentifier): ?Authorization
