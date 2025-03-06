@@ -94,8 +94,9 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
                 }
                 continue;
             }
-            $identityToken = $account->getCredentialsSource();
-            if (!$identityToken instanceof IdentityToken) {
+            try {
+                $identityToken = IdentityToken::fromJwt($account->getCredentialsSource());
+            } catch (\InvalidArgumentException) {
                 $this->logger->error(sprintf('OpenID Connect: No identity token found in credentials source of account %s - could not set JWT cookie.', $account->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
                 continue;
             }
