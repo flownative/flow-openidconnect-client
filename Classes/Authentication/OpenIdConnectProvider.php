@@ -23,6 +23,7 @@ use Neos\Flow\Security\Exception\NoSuchRoleException;
 use Neos\Flow\Security\Exception\UnsupportedAuthenticationTokenException;
 use Neos\Flow\Security\Policy\PolicyService;
 use Neos\Flow\Security\Policy\Role;
+use Neos\Flow\Session\SessionInterface;
 use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectProvider extends AbstractProvider
@@ -50,6 +51,12 @@ final class OpenIdConnectProvider extends AbstractProvider
      * @var AccountRepository
      */
     protected $accountRepository;
+
+    /**
+     * @Flow\Inject
+     * @var SessionInterface
+     */
+    protected $session;
 
     /**
      * @return array
@@ -100,6 +107,23 @@ final class OpenIdConnectProvider extends AbstractProvider
             if (!$hasValidSignature) {
                 throw new SecurityException('Open ID Connect: The identity token provided by the OIDC provider had an invalid signature', 1561479176);
             }
+
+            $refreshToken = $authenticationToken->getRefreshToken();
+            if ($refreshToken !== '') {
+                if ($this->session->canBeResumed()) {
+                    $this->session->resume();
+                }
+                if (!$this->session->isStarted()) {
+                    $this->session->start();
+                }
+
+                if ($this->session->isStarted()) {
+                    $this->logger->debug('OpenID Connect: Set refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
+                    $this->session->putData('flownative_oidc_refresh', $refreshToken);
+                } else {
+                    $this->logger->debug('OpenID Connect: Could not store refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
+                }
+            }
             $this->logger->debug(sprintf('OpenID Connect: Successfully verified signature of identity token with %s value "%s"', $this->options['accountIdentifierTokenValueName'], $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? 'unknown'), LogEnvironment::fromMethodName(__METHOD__));
         } catch (SecurityException\AuthenticationRequiredException) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
@@ -110,6 +134,38 @@ final class OpenIdConnectProvider extends AbstractProvider
             }
             $this->logger->notice(sprintf('OpenID Connect: The authentication provider caught an exception: %s', $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return;
+        }
+
+        if ($identityToken->isExpiredAt(new \DateTimeImmutable())) {
+            if ($this->session->canBeResumed()) {
+                $this->session->resume();
+            }
+            if (!$this->session->isStarted()) {
+                $this->session->start();
+            }
+            if ($this->session->isStarted()) {
+                if ($this->session->isStarted()) {
+                    $refreshToken = (string)$this->session->getData('flownative_oidc_refresh');
+                    if ($refreshToken !== '') {
+                        $this->logger->info(sprintf('OpenID Connect: The JWT "%s" is expired, trying to refresh with refresh token from session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
+                        try {
+                            $tokenSet = (new OpenIdConnectClient($this->options['serviceName']))->refreshIdentityToken($identityToken, $refreshToken);
+                            $identityToken = $tokenSet->identityToken;
+                            $refreshToken = $tokenSet->refreshToken;
+                            if ($refreshToken !== '') {
+                                $this->logger->debug(sprintf('OpenID Connect: Set new refresh token with value "%s" in session', $refreshToken), LogEnvironment::fromMethodName(__METHOD__));
+                                $this->session->putData('flownative_oidc_refresh', $refreshToken);
+                            } else {
+                                $this->logger->info('OpenID Connect: Did not receive new refresh token to set in session', LogEnvironment::fromMethodName(__METHOD__));
+                            }
+                        } catch (ConnectionException|ServiceException $e) {
+                            $this->logger->info(sprintf('OpenID Connect: Could not refresh JWT: %s', $e->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+                        }
+                    } else {
+                        $this->logger->info(sprintf('OpenID Connect: The JWT "%s" is expired, no refresh token in session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
+                    }
+                }
+            }
         }
 
         if ($identityToken->isExpiredAt(new \DateTimeImmutable())) {

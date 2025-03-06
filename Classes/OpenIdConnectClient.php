@@ -2,8 +2,8 @@
 
 namespace Flownative\OpenIdConnect\Client;
 
-use Doctrine\ORM\OptimisticLockException;
 use Doctrine\ORM\Exception\ORMException;
+use Doctrine\ORM\OptimisticLockException;
 use Flownative\OAuth2\Client\Authorization;
 use Flownative\OAuth2\Client\OAuthClientException;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
@@ -161,6 +161,7 @@ final class OpenIdConnectClient
      * @throws ConnectionException
      * @throws IdentityProviderException
      * @throws GuzzleException
+     * @throws \SodiumException
      */
     public function getAccessToken(string $serviceName, string $clientId, string $clientSecret, string $scope, array $additionalParameters = []): AccessToken
     {
@@ -216,7 +217,7 @@ final class OpenIdConnectClient
             throw new \RuntimeException(substr($returnArguments, 6));
         }
         $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
-        $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid']))));
+        $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid', 'offline_access']))));
 
         if (empty($this->options['clientId']) || empty($this->options['clientSecret'])) {
             throw new \RuntimeException(sprintf('OpenID Connect Client: Authorization Code Flow requires "clientId" and "clientSecret" to be configured for service "%s".', $this->serviceName), 1596456168);
@@ -225,12 +226,12 @@ final class OpenIdConnectClient
     }
 
     /**
-     * Returns the current OpenId Connect Identity Token
+     * Returns the current identity token and refresh token in a TokenSet
      *
      * @throws ConnectionException
      * @throws ServiceException|\SodiumException
      */
-    public function getIdentityToken(string $authorizationIdentifier): IdentityToken
+    public function getIdentityToken(string $authorizationIdentifier): TokenSet
     {
         $authorization = $this->getAuthorization($authorizationIdentifier);
         if (!$authorization instanceof Authorization) {
@@ -245,8 +246,11 @@ final class OpenIdConnectClient
             throw new ServiceException('OpenID Connect Client: No id_token found in values of current oAuth token', 1559208674);
         }
         try {
-            return IdentityToken::fromJwt($tokenValues['id_token']);
-        } catch (\JsonException $e) {
+            return new TokenSet(
+                IdentityToken::fromJwt($tokenValues['id_token']),
+                $accessToken->getRefreshToken()
+            );
+        } catch (\InvalidArgumentException $e) {
             throw new ServiceException('OpenID Connect Client: Failed parsing identity token from JWT', 1602501992, $e);
         }
     }
@@ -293,6 +297,46 @@ final class OpenIdConnectClient
     }
 
     /**
+     * @throws ServiceException
+     * @throws ConnectionException
+     */
+    public function refreshIdentityToken(IdentityToken $identityToken, string $refreshToken): TokenSet
+    {
+        $tokenEndpoint = $this->options['tokenEndpoint'];
+        try {
+            $response = $this->httpClient->request('POST', $tokenEndpoint, [
+                'form_params' => [
+                    'grant_type' => 'refresh_token',
+                    'client_id' => $this->settings['services'][$this->serviceName]['options']['clientId'],
+                    'client_secret' => $this->settings['services'][$this->serviceName]['options']['clientSecret'],
+                    'refresh_token' => $refreshToken,
+                    'prompt' => 'none',
+                    'id_token_hint' => $identityToken->asJwt()
+                ]
+            ]);
+        } catch (GuzzleException $e) {
+            throw new ConnectionException(sprintf('OpenID Connect Client: Failed refreshing identity token from %s: %s', $tokenEndpoint, $e->getMessage()), 1741193078);
+        }
+
+        try {
+            $response = json_decode($response->getBody()->getContents(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while refreshing identity token from %s', $tokenEndpoint), 1741193238, $e);
+        }
+        if (!is_array($response) || !isset($response['id_token'])) {
+            throw new ServiceException(sprintf('OpenID Connect Client: Invalid response data while refreshing identity token from %s', $tokenEndpoint), 1741193241);
+        }
+
+        try {
+            $result = new TokenSet(IdentityToken::fromJwt($response['id_token']), '');
+        } catch (\InvalidArgumentException $e) {
+            throw new ServiceException(sprintf('OpenID Connect Client: Could not  construct identity token from response data while refreshing identity token from %s', $tokenEndpoint), 1741271679, $e);
+        }
+
+        return $result;
+    }
+
+    /**
      * @throws ConnectionException
      * @throws CacheException
      */
@@ -330,7 +374,7 @@ final class OpenIdConnectClient
     {
         try {
             $authorization = $this->oAuthClient->getAuthorization($authorizationIdentifier);
-        } catch (ORMException | OptimisticLockException $exception) {
+        } catch (ORMException|OptimisticLockException $exception) {
             throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving oAuth token %s: %s', $authorizationIdentifier, $exception->getMessage()), 1559202394);
         }
         return $authorization;
