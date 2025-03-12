@@ -22,23 +22,13 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
      */
     public const OIDC_PARAMETER_NAME = 'flownative_oidc';
 
-    /**
-     * @var array
-     */
-    protected $queryParameters;
+    protected array $queryParameters = [];
+
+    protected array $cookies = [];
+
+    protected string $authorizationHeader = '';
 
     /**
-     * @var array
-     */
-    protected $cookies = [];
-
-    /**
-     * @var string
-     */
-    protected $authorizationHeader;
-
-    /**
-     * @param ActionRequest $actionRequest
      * @throws InvalidAuthenticationStatusException
      */
     public function updateCredentials(ActionRequest $actionRequest): void
@@ -50,13 +40,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
         $this->cookies = $httpRequest->getCookieParams();
 
         if ($httpRequest->hasHeader('Authorization')) {
-            $this->authorizationHeader = $httpRequest->getHeader('Authorization');
-        } elseif ($httpRequest->hasHeader('authorization')) {
-            $this->authorizationHeader = $httpRequest->getHeader('Authorization');
-        }
-
-        if (is_array($this->authorizationHeader)) {
-            $this->authorizationHeader = reset($this->authorizationHeader);
+            $this->authorizationHeader = current($httpRequest->getHeader('Authorization'));
         }
     }
 
@@ -72,9 +56,8 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
      */
     public function extractIdentityTokenFromRequest(string $cookieName): IdentityToken
     {
-        if ($this->authorizationHeader !== null && str_contains($this->authorizationHeader, 'Bearer ')) {
+        if ($this->authorizationHeader !== '' && str_contains($this->authorizationHeader, 'Bearer ')) {
             $identityToken = $this->extractIdentityTokenFromAuthorizationHeader($this->authorizationHeader);
-
         } elseif (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
             $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
             if (!isset($this->queryParameters[$authorizationIdQueryParameterName])) {
@@ -105,8 +88,6 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     }
 
     /**
-     * @param string $authorizationHeader
-     * @return IdentityToken
      * @throws AccessDeniedException | AuthenticationRequiredException | InvalidAuthenticationStatusException
      */
     private function extractIdentityTokenFromAuthorizationHeader(string $authorizationHeader): IdentityToken
@@ -127,8 +108,6 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     }
 
     /**
-     * @param string $cookieName
-     * @return IdentityToken
      * @throws AuthenticationRequiredException
      * @throws InvalidAuthenticationStatusException
      */

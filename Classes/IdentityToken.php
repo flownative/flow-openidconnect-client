@@ -16,41 +16,14 @@ use phpseclib3\Math\BigInteger;
  */
 class IdentityToken
 {
-    /**
-     * @var array
-     */
-    public $values = [];
+    public array $values = [];
+    private array $header;
+    private string $jwt;
+    private Token $parsedJwt;
+    private string $payload;
+    private string $signature;
 
     /**
-     * @var array
-     */
-    private $header;
-
-    /**
-     * @var string
-     */
-    private $jwt;
-
-    /**
-     * @var Token
-     */
-    private $parsedJwt;
-
-    /**
-     * @var string
-     */
-    private $payload;
-
-    /**
-     * @var string
-     */
-    private $signature;
-
-    /**
-     * From JSON Web Token
-     *
-     * @param string $jwt
-     * @return IdentityToken
      * @see https://tools.ietf.org/html/rfc7519
      */
     public static function fromJwt(string $jwt): IdentityToken
@@ -75,12 +48,13 @@ class IdentityToken
 
         // The JOSE Header (JSON Object Signing and Encryption), see: https://tools.ietf.org/html/rfc7515
         try {
-            $identityToken->header = json_decode(self::base64UrlDecode($parts[0]), true, 512, JSON_THROW_ON_ERROR);
+            $header = json_decode(self::base64UrlDecode($parts[0]), true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($header)) {
+                throw new \InvalidArgumentException('Failed decoding JOSE header from JWT.', 1559207497);
+            }
+            $identityToken->header = $header;
         } catch (JsonException $e) {
             throw new \InvalidArgumentException('Failed decoding JOSE header from JWT.', 1603362934, $e);
-        }
-        if (!is_array($identityToken->header)) {
-            throw new \InvalidArgumentException('Failed decoding JOSE header from JWT.', 1559207497);
         }
         if (!isset($identityToken->header['alg'])) {
             throw new \InvalidArgumentException('Missing signature algorithm in JOSE header from JWT.', 1559212231);
@@ -105,9 +79,6 @@ class IdentityToken
         return $identityToken;
     }
 
-    /**
-     * @return string
-     */
     public function asJwt(): string
     {
         return $this->jwt;
@@ -117,7 +88,6 @@ class IdentityToken
      * Verify the signature (JWS) of this token using a given JWK
      *
      * @param array $jwks The JSON Web Keys to use for verification
-     * @return bool
      * @throws ServiceException
      * @see https://tools.ietf.org/html/rfc7517
      */
@@ -141,10 +111,6 @@ class IdentityToken
         return $isValid;
     }
 
-    /**
-     * @param \DateTimeInterface $now
-     * @return bool
-     */
     public function isExpiredAt(\DateTimeInterface $now): bool
     {
         return $this->parsedJwt->isExpired($now);
@@ -152,9 +118,6 @@ class IdentityToken
 
     /**
      * Checks if the identity token's "scope" value contains the given identifier
-     *
-     * @param string $scopeIdentifier
-     * @return bool
      */
     public function scopeContains(string $scopeIdentifier): bool
     {
@@ -169,7 +132,6 @@ class IdentityToken
      * @param array $jwk The JSON Web Key as an array, with array keys like "kid", "kty", "use", "alg", "exp" etc.
      * @param string $payload The JWT payload, including header
      * @param string $signature The JWS
-     * @return bool
      */
     private function verifyRsaJwtSignature(string $hashType, array $jwk, string $payload, string $signature): bool
     {
@@ -188,10 +150,6 @@ class IdentityToken
     /**
      * Returns the matching JWK from the given list of keys, according to the specified algorithm and optional key identifier
      *
-     * @param array $keys
-     * @param string $algorithm
-     * @param string|null $keyIdentifier
-     * @return array
      * @throws ServiceException
      */
     private function getMatchingKeyForJws(array $keys, string $algorithm, ?string $keyIdentifier): array
@@ -213,9 +171,6 @@ class IdentityToken
 
     /**
      * Decode Base64URL-encoded data
-     *
-     * @param string $base64UrlEncodedString
-     * @return string
      */
     private static function base64UrlDecode(string $base64UrlEncodedString): string
     {
@@ -226,9 +181,6 @@ class IdentityToken
         return base64_decode(strtr($base64UrlEncodedString, '-_', '+/'));
     }
 
-    /**
-     * @return string
-     */
     public function __toString(): string
     {
         return $this->asJwt();
