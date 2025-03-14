@@ -28,6 +28,8 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
     protected string $authorizationHeader = '';
 
+    protected string $refreshToken = '';
+
     /**
      * @throws InvalidAuthenticationStatusException
      */
@@ -74,7 +76,9 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
             $client = new OpenIdConnectClient($tokenArguments[TokenArguments::SERVICE_NAME]);
 
             try {
-                $identityToken = $client->getIdentityToken($authorizationIdentifier);
+                $tokenSet = $client->getIdentityToken($authorizationIdentifier);
+                $identityToken = $tokenSet->identityToken;
+                $this->refreshToken = $tokenSet->refreshToken;
                 $client->removeAuthorization($authorizationIdentifier);
             } catch (ServiceException | ConnectionException $exception) {
                 throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s": %s', $authorizationIdentifier, $exception->getMessage()), 1560350413, $exception);
@@ -85,6 +89,11 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
         // NOTE: This token is not verified yet – signature and expiration time must be checked by code using this token
         return $identityToken;
+    }
+
+    public function getRefreshToken(): string
+    {
+        return $this->refreshToken;
     }
 
     /**
