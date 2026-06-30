@@ -41,7 +41,7 @@ final class OidcCommandController extends CommandController
      * @param string|null $serviceName The service name, as it was configured via Flow settings
      * @return void
      */
-    public function discoverCommand(string $serviceName = null): void
+    public function discoverCommand(?string $serviceName = null): void
     {
         if (empty($this->settings['services'])) {
             $this->outputLine('<error>There are no services configured in the Flow settings</error>');
