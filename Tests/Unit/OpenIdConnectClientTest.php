@@ -14,10 +14,14 @@ namespace Flownative\OpenIdConnect\Client;
  */
 
 use Flownative\OAuth2\Client\Authorization;
+use Flownative\OpenIdConnect\Client\Authentication\Nonce;
+use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
+use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\OpenIdConnectClientFixture;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
+use GuzzleHttp\Psr7\Uri;
 use League\OAuth2\Client\Token\AccessToken;
 use Neos\Cache\Backend\TransientMemoryBackend;
 use Neos\Cache\Frontend\VariableFrontend;
@@ -27,6 +31,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\StreamInterface;
+use Psr\Http\Message\UriInterface;
 use Psr\Log\LoggerInterface;
 use ReflectionException;
 
@@ -90,6 +95,27 @@ class OpenIdConnectClientTest extends TestCase
         $this->inject($this->oidcClient, 'jwksCache', $this->jwksCache);
         $this->inject($this->oidcClient, 'oAuthClient', $this->oAuthClient);
         $this->inject($this->oidcClient, 'logger', $logger);
+    }
+
+    #[Test]
+    public function startAuthorizationRemovesParametersOfEarlierLoginFromReturnUri(): void
+    {
+        $returnToUri = null;
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturnCallback(
+            function (string $clientId, string $clientSecret, UriInterface $givenReturnToUri) use (&$returnToUri): UriInterface {
+                $returnToUri = $givenReturnToUri;
+                return new Uri('https://id.example.com/authorize');
+            }
+        );
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class));
+        $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
+
+        $client->startAuthorization(new Uri('https://www.example.com/secure?page=2&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=stale&' . $authorizationIdQueryParameterName . '=stale-id'), 'profile', Nonce::generate());
+
+        parse_str($returnToUri->getQuery(), $queryParameters);
+        static::assertSame(['page', OpenIdConnectToken::OIDC_PARAMETER_NAME], array_keys($queryParameters));
+        static::assertNotSame('stale', $queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME]);
     }
 
     #[Test]

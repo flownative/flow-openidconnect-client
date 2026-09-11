@@ -311,8 +311,14 @@ after a successful login.
 
 The identity provider must return the nonce in the identity token, as
 OpenID Connect requires. If it doesn't, every login fails and the
-security log contains "contains no nonce". Logins which are in progress
-while you update this package fail once and then start again.
+security log contains "contains no nonce".
+
+If a login is rejected when the browser returns, the entry point
+doesn't start another login, because the identity provider would
+usually send the user back right away and the login would be rejected
+again. Instead, it answers with status 403 and a short page with a link
+to try again. Logins which are in progress while you update this package
+end on this page once.
 
 If you start an authorization yourself, pass a new nonce to
 `OpenIdConnectClient::startAuthorization()` and set its cookie on the

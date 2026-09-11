@@ -192,24 +192,19 @@ class OpenIdConnectEntryPointTest extends TestCase
     }
 
     #[Test]
-    public function startAuthenticationRemovesParametersOfRejectedReturnFromReturnUri(): void
+    public function startAuthenticationDoesNotStartAnotherLoginIfReturnFromIdentityProviderWasRejected(): void
     {
-        $returnToUri = null;
-        $oAuthClient = $this->createStub(OAuthClient::class);
-        $oAuthClient->method('startAuthorization')->willReturnCallback(
-            function (string $clientId, string $clientSecret, UriInterface $givenReturnToUri) use (&$returnToUri): UriInterface {
-                $returnToUri = $givenReturnToUri;
-                return new Uri(self::AUTHORIZATION_URI);
-            }
-        );
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->expects($this->never())->method('startAuthorization');
         $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
         $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test']);
 
-        $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure?page=2&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=stale&' . $authorizationIdQueryParameterName . '=stale-id'), new Response());
+        $response = $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure?page=2&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=rejected&' . $authorizationIdQueryParameterName . '=rejected-id'), new Response());
 
-        parse_str($returnToUri->getQuery(), $queryParameters);
-        static::assertSame(['page', OpenIdConnectToken::OIDC_PARAMETER_NAME], array_keys($queryParameters));
-        static::assertNotSame('stale', $queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME]);
+        static::assertSame(403, $response->getStatusCode());
+        static::assertSame('no-store', $response->getHeaderLine('Cache-Control'));
+        static::assertFalse($response->hasHeader('Set-Cookie'));
+        static::assertStringContainsString('<a href="https://www.example.com/secure?page=2">Try again</a>', (string)$response->getBody());
     }
 
     public static function pendingLogins(): array

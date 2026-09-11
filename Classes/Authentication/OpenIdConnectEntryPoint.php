@@ -5,8 +5,10 @@ namespace Flownative\OpenIdConnect\Client\Authentication;
 use Flownative\OAuth2\Client\OAuthClientException;
 use Flownative\OpenIdConnect\Client\ConfigurationException;
 use Flownative\OpenIdConnect\Client\CookieSettings;
+use Flownative\OpenIdConnect\Client\OAuthClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
+use GuzzleHttp\Psr7\Query;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\ContentStream;
 use Neos\Flow\Log\Utility\LogEnvironment;
@@ -47,6 +49,12 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
                 ->withHeader('Cache-Control', 'no-store');
         }
 
+        // The identity provider usually sends the user back without asking, so the new login would be rejected again, in an endless loop
+        if ($this->isReturnFromIdentityProvider($request)) {
+            $this->logger?->notice(sprintf('OpenID Connect: The login for service "%s" was rejected when the browser returned from the identity provider, showing an error instead of starting another login', $this->options['serviceName']), LogEnvironment::fromMethodName(__METHOD__));
+            return $this->createLoginFailedResponse($request, $response);
+        }
+
         $nonce = Nonce::generate();
         $client = $this->openIdConnectClientFactory->create($this->options['serviceName']);
         try {
@@ -68,7 +76,7 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
 
         $cookieSettings = CookieSettings::fromMiddlewareSettings($this->middlewareSettings);
 
-        // Each login in progress keeps a cookie until it expires. Without a limit, repeated logins, for example after rejected returns,
+        // Each login in progress keeps a cookie until it expires. Without a limit, many logins which were started but never finished
         // would soon exceed the size of request headers which web servers accept.
         $pendingNonceCookieNames = Nonce::findCookieNames($request->getCookieParams(), $cookieSettings);
         if (count($pendingNonceCookieNames) >= self::MAXIMUM_PENDING_LOGINS) {
@@ -108,5 +116,27 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         // Browsers which don't send this header are expected to navigate
         $fetchMode = $request->getHeaderLine('Sec-Fetch-Mode');
         return $fetchMode === '' || $fetchMode === 'navigate';
+    }
+
+    private function isReturnFromIdentityProvider(ServerRequestInterface $request): bool
+    {
+        return array_key_exists(OpenIdConnectToken::OIDC_PARAMETER_NAME, Query::parse($request->getUri()->getQuery()));
+    }
+
+    /**
+     * The link to try again leads to the same page, without the parameters of the rejected login
+     */
+    private function createLoginFailedResponse(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
+    {
+        $queryParameters = Query::parse($request->getUri()->getQuery());
+        unset($queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME], $queryParameters[OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE)]);
+        $retryUri = (string)$request->getUri()->withQuery(Query::build($queryParameters));
+
+        $body = sprintf('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Login failed</title></head><body><h1>Login failed</h1><p>The login could not be completed. <a href="%s">Try again</a></p></body></html>', htmlentities($retryUri, ENT_QUOTES, 'utf-8'));
+        return $response
+            ->withStatus(403)
+            ->withBody(ContentStream::fromContents($body))
+            ->withHeader('Content-Type', 'text/html; charset=utf-8')
+            ->withHeader('Cache-Control', 'no-store');
     }
 }

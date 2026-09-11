@@ -88,7 +88,11 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
         //
         // See also https://bugzilla.mozilla.org/show_bug.cgi?id=1465402
         // and https://web.dev/samesite-cookies-explained/
-        if ($cookieSettings->sameSite !== Cookie::SAMESITE_STRICT && !$response->hasHeader('Location')) {
+        //
+        // Error responses, like the page of a rejected login, must reach the browser unchanged. Redirecting them would start the rejected
+        // login again.
+        $isSuccessful = $response->getStatusCode() >= 200 && $response->getStatusCode() < 300;
+        if ($isSuccessful && $cookieSettings->sameSite !== Cookie::SAMESITE_STRICT && !$response->hasHeader('Location')) {
             return $this->withRedirectToRemoveOidcQueryParameters($request, $response);
         }
 

@@ -22,6 +22,7 @@ longer used.
 | [JWT cookie](#jwt-cookie)                                     | JavaScript or a proxy reads the JWT cookie, or you rely on its name                                             |
 | [Bearer tokens](#bearer-tokens)                               | clients rely on a cookie or a server-side refresh after sending a bearer token                                  |
 | [Login binding](#login-binding)                               | your code calls `OpenIdConnectClient::startAuthorization()`, or the login runs in a cross-site iframe            |
+| [Rejected logins](#rejected-logins)                           | users can end up with a rejected login, for example with an unverified email address                            |
 | [Status 401 for scripts](#status-401-for-scripts-and-api-clients) | your frontend loads content with XHR, fetch or HTMX                                                         |
 | [Refresh tokens](#refresh-tokens)                             | your code calls `OpenIdConnectClient::refreshIdentityToken()`                                                   |
 | [Changed APIs](#changes-for-code-which-uses-the-package-directly) | your code uses classes of this package directly                                                              |
@@ -218,8 +219,8 @@ browser must still have the cookie.
 - The cookie has "SameSite=Lax". Browsers don't send it to a login which
   runs in an iframe on another site, so such a login fails with "not
   started in this browser" in the security log.
-- Logins which are in progress while you deploy the update fail once
-  and then start again.
+- Logins which are in progress while you deploy the update fail once,
+  see [Rejected logins](#rejected-logins).
 
 ### Code Which Starts an Authorization
 
@@ -251,6 +252,19 @@ public function loginAction(): void
     $this->redirectToUri($uri);
 }
 ```
+
+## Rejected Logins
+
+If the application rejects a login when the browser returns from the
+identity provider, the entry point no longer starts another login. The
+identity provider would usually send the user back right away without
+asking, and the login would be rejected again, which ended in an
+endless redirect loop. Reasons are, for example, an unexpected audience,
+an unverified email address or a missing nonce cookie.
+
+The entry point now answers with status 403 and a short "Login failed"
+page with a link to try again. The security log contains "was rejected
+when the browser returned" together with the reason of the rejection.
 
 ## Status 401 for Scripts and API Clients
 
@@ -311,3 +325,4 @@ update:
 | "contains no nonce"                           | the identity provider didn't return the nonce of the login                          |
 | "not started in this browser"                 | the nonce cookie is missing, for example because the login ran in a cross-site iframe |
 | "belongs to another identity token"           | the session holds a refresh token for another identity token, so nothing is refreshed |
+| "was rejected when the browser returned"      | the entry point showed the "Login failed" page instead of starting another login     |

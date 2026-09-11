@@ -446,4 +446,31 @@ class SetJwtCookieMiddlewareTest extends TestCase
         $response = $middleware->process($mockRequest, $this->mockNextRequestHandler);
         self::assertSame('http://original-redirect.tld', $response->getHeaderLine('Location'));
     }
+
+    public static function errorStatusCodes(): array
+    {
+        return [
+            'unauthorized' => [401],
+            'rejected login' => [403],
+            'server error' => [500],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('errorStatusCodes')]
+    public function removeOidcQueryParametersDoesNotRedirectErrorResponses(int $statusCode): void
+    {
+        $middleware = $this->getMiddleware();
+        $this->mockSecurityContext->method('isInitialized')->willReturn(true);
+        $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([]);
+        $mockRequest = $this->createStub(ServerRequestInterface::class);
+        $mockRequest->method('getUri')->willReturn(new Uri('http://localhost?flownative_oidc=foo&flownative_oauth2_authorization_id_oidc=bar'));
+        $this->mockNextRequestHandler->originalResponse = new Response($statusCode, [], 'Login failed');
+
+        $response = $middleware->process($mockRequest, $this->mockNextRequestHandler);
+
+        self::assertSame($statusCode, $response->getStatusCode());
+        self::assertFalse($response->hasHeader('Location'));
+        self::assertSame('Login failed', (string)$response->getBody());
+    }
 }
