@@ -1,27 +1,38 @@
 <?php
+declare(strict_types=1);
+
 namespace Flownative\OpenIdConnect\Client;
 
 use DateTimeInterface;
 use InvalidArgumentException;
 use JsonException;
 use Lcobucci\JWT\Encoding\JoseEncoder;
-use Lcobucci\JWT\Token;
+use Lcobucci\JWT\Exception as JwtException;
+use Lcobucci\JWT\Token\Parser;
+use Lcobucci\JWT\Token\RegisteredClaims;
+use Lcobucci\JWT\UnencryptedToken;
 use Neos\Utility\Arrays;
 use phpseclib3\Crypt\PublicKeyLoader;
 use phpseclib3\Crypt\RSA;
+use phpseclib3\Exception\NoKeyLoadedException;
 use phpseclib3\Math\BigInteger;
 
 /**
  * Value object for an OpenID Connect identity token
  *
- * @see https://openid.net/specs/openid-connect-basic-1_0.html#IDToken
+ * Creating an identity token only checks its structure. Code using the token must verify
+ * the signature and the claims before trusting any of its values.
+ *
+ * @see https://openid.net/specs/openid-connect-core-1_0.html#IDToken
  */
 class IdentityToken
 {
+    private const array SUPPORTED_ALGORITHMS = ['RS256', 'RS384', 'RS512'];
+
     public array $values = [];
     private array $header;
     private string $jwt;
-    private Token $parsedJwt;
+    private UnencryptedToken $parsedJwt;
     private string $payload;
     private string $signature;
 
@@ -61,6 +72,16 @@ class IdentityToken
         if (!isset($identityToken->header['alg'])) {
             throw new InvalidArgumentException('Missing signature algorithm in JOSE header from JWT.', 1559212231);
         }
+        if (!is_string($identityToken->header['alg'])) {
+            throw new InvalidArgumentException('The signature algorithm in the JOSE header of the JWT is not a string.', 1789122172);
+        }
+        if (isset($identityToken->header['kid']) && !is_string($identityToken->header['kid'])) {
+            throw new InvalidArgumentException('The key identifier in the JOSE header of the JWT is not a string.', 1789122173);
+        }
+        // No header extensions are supported, so tokens marking any extension as critical must be rejected (RFC 7515, section 4.1.11).
+        if (array_key_exists('crit', $identityToken->header)) {
+            throw new InvalidArgumentException('The JWT uses critical header extensions, which are not supported.', 1789123616);
+        }
 
         // The JWT payload, including header, sans signature
         $identityToken->payload = implode('.', $parts);
@@ -74,10 +95,24 @@ class IdentityToken
             throw new InvalidArgumentException('Failed decoding identity token from JWT.', 1559208043);
         }
 
-        $jwtParser = new Token\Parser(new JoseEncoder());
+        // The parser only accepts numbers and strings as time claims and throws a TypeError for any other type.
+        foreach ([RegisteredClaims::EXPIRATION_TIME, RegisteredClaims::NOT_BEFORE, RegisteredClaims::ISSUED_AT] as $timeClaimName) {
+            if (array_key_exists($timeClaimName, $identityTokenArray) && !is_int($identityTokenArray[$timeClaimName]) && !is_float($identityTokenArray[$timeClaimName]) && !is_string($identityTokenArray[$timeClaimName])) {
+                throw new InvalidArgumentException(sprintf('The claim "%s" of the JWT is not a valid time.', $timeClaimName), 1789122174);
+            }
+        }
+
+        try {
+            $parsedJwt = (new Parser(new JoseEncoder()))->parse($jwt);
+        } catch (JwtException $exception) {
+            throw new InvalidArgumentException('Failed parsing the claims of the JWT.', 1789122174, $exception);
+        }
+        if (!$parsedJwt instanceof UnencryptedToken) {
+            throw new InvalidArgumentException('Failed parsing the claims of the JWT.', 1789122174);
+        }
 
         $identityToken->values = $identityTokenArray;
-        $identityToken->parsedJwt = $jwtParser->parse($jwt);
+        $identityToken->parsedJwt = $parsedJwt;
         return $identityToken;
     }
 
@@ -87,35 +122,57 @@ class IdentityToken
     }
 
     /**
-     * Verify the signature (JWS) of this token using a given JWK
+     * Verifies the signature (JWS) of this token with the matching keys of the given JSON Web Key Set
      *
-     * @param array $jwks The JSON Web Keys to use for verification
-     * @throws ServiceException
+     * If the token names a key identifier, only the key with this identifier is used. Otherwise,
+     * every key which is suitable for the algorithm of the token is tried.
+     *
+     * @param array $jwks The JSON Web Keys of the identity provider
+     * @throws ServiceException if the algorithm is not supported or no suitable key exists
      * @see https://tools.ietf.org/html/rfc7517
      */
     public function hasValidSignature(array $jwks): bool
     {
-        switch ($this->header['alg']) {
-            case 'RS256':
-            case 'RS384':
-            case 'RS512':
-                $hashType = 'sha' . substr($this->header['alg'], 2);
-                $isValid = $this->verifyRsaJwtSignature(
-                    $hashType,
-                    $this->getMatchingKeyForJws($jwks, $this->header['alg'], $this->header['kid'] ?? null),
-                    $this->payload,
-                    $this->signature
-                );
-                break;
-            default:
-                throw new ServiceException(sprintf('Unsupported JWT signature type %s.', $this->header['alg']), 1559213623);
+        $algorithm = $this->header['alg'];
+        if (!in_array($algorithm, self::SUPPORTED_ALGORITHMS, true)) {
+            throw new ServiceException(sprintf('Unsupported JWT signature type %s.', json_encode($algorithm)), 1559213623);
         }
-        return $isValid;
+
+        $hashType = 'sha' . substr($algorithm, 2);
+        foreach ($this->getMatchingKeysForJws($jwks, $algorithm, $this->header['kid'] ?? null) as $jwk) {
+            if ($this->verifyRsaJwtSignature($hashType, $jwk)) {
+                return true;
+            }
+        }
+        return false;
     }
 
+    /**
+     * A token without an expiration time counts as expired, because OpenID Connect requires the "exp" claim.
+     */
     public function isExpiredAt(DateTimeInterface $now): bool
     {
+        if (!$this->parsedJwt->claims()->has(RegisteredClaims::EXPIRATION_TIME)) {
+            return true;
+        }
         return $this->parsedJwt->isExpired($now);
+    }
+
+    /**
+     * Checks if the token was issued ("iat") or becomes valid ("nbf") only after the given time
+     */
+    public function isNotYetValidAt(DateTimeInterface $now): bool
+    {
+        $claims = $this->parsedJwt->claims();
+        if ($claims->has(RegisteredClaims::ISSUED_AT) && !$this->parsedJwt->hasBeenIssuedBefore($now)) {
+            return true;
+        }
+        return $claims->has(RegisteredClaims::NOT_BEFORE) && !$this->parsedJwt->isMinimumTimeBefore($now);
+    }
+
+    public function isIssuedBy(string $issuer): bool
+    {
+        return ($this->values['iss'] ?? null) === $issuer;
     }
 
     /**
@@ -138,51 +195,67 @@ class IdentityToken
         if (is_string($audiences)) {
             $audiences = [$audiences];
         }
-        return is_array($audiences) && in_array($audience, $audiences, true);
+        return is_array($audiences) && array_is_list($audiences) && in_array($audience, $audiences, true);
     }
 
     /**
-     * Verifies a signature for the given payload using the given JSON web key and hash type.
-     *
-     * @param string $hashType The used hash type, for example SHA256, SHA384 or SHA512
-     * @param array $jwk The JSON Web Key as an array, with array keys like "kid", "kty", "use", "alg", "exp" etc.
-     * @param string $payload The JWT payload, including header
-     * @param string $signature The JWS
+     * Verifies the signature of this token using the given JSON web key and hash type, for example "sha256"
      */
-    private function verifyRsaJwtSignature(string $hashType, array $jwk, string $payload, string $signature): bool
+    private function verifyRsaJwtSignature(string $hashType, array $jwk): bool
     {
-        if (!isset($jwk['n'], $jwk['e'])) {
-            throw new InvalidArgumentException('Failed verifying RSA JWT signature because of an invalid JSON Web Key.', 1559214667);
+        try {
+            $key = PublicKeyLoader::load([
+                'e' => new BigInteger(self::base64UrlDecode($jwk['e']), 256),
+                'n' => new BigInteger(self::base64UrlDecode($jwk['n']), 256)
+            ]);
+        } catch (NoKeyLoadedException) {
+            return false;
         }
-        $key = PublicKeyLoader::load([
-            'e' => new BigInteger(self::base64UrlDecode($jwk['e']), 256),
-            'n' => new BigInteger(self::base64UrlDecode($jwk['n']), 256)
-        ])
+        return $key
             ->withHash($hashType)
-            ->withPadding(RSA::SIGNATURE_PKCS1);
-        return $key->verify($payload, $signature);
+            ->withPadding(RSA::SIGNATURE_PKCS1)
+            ->verify($this->payload, $this->signature);
     }
 
     /**
-     * Returns the matching JWK from the given list of keys, according to the specified algorithm and optional key identifier
+     * Returns the keys of the given JSON Web Key Set which may have been used for signing this token
      *
+     * @return array[]
      * @throws ServiceException
      */
-    private function getMatchingKeyForJws(array $keys, string $algorithm, ?string $keyIdentifier): array
+    private function getMatchingKeysForJws(array $keys, string $algorithm, ?string $keyIdentifier): array
     {
-        foreach ($keys as $key) {
-            if ($key['kty'] === 'RSA') {
-                if ($keyIdentifier === null || !isset($key['kid']) || $key['kid'] === $keyIdentifier) {
-                    return $key;
-                }
-            } elseif (isset($key['alg']) && $key['alg'] === $algorithm && $key['kid'] === $keyIdentifier) {
-                return $key;
-            }
+        $matchingKeys = array_values(array_filter(
+            $keys,
+            static fn (mixed $key): bool => self::isKeySuitableForAlgorithm($key, $algorithm)
+                && ($keyIdentifier === null || ($key['kid'] ?? null) === $keyIdentifier)
+        ));
+        if ($matchingKeys !== []) {
+            return $matchingKeys;
         }
-        if (!empty($keyIdentifier)) {
-            throw new ServiceException(sprintf('Failed finding a matching JSON Web Key using algorithm %s for key identifier %s.', $algorithm, $keyIdentifier), 1559213482);
+        if ($keyIdentifier !== null) {
+            throw new ServiceException(sprintf('Failed finding a matching JSON Web Key using algorithm %s for key identifier %s.', $algorithm, json_encode($keyIdentifier)), 1559213482);
         }
-        throw new ServiceException(sprintf('Failed finding a matching JSON Web Key using RSA for key identifier %s.', $keyIdentifier), 1559213507);
+        throw new ServiceException(sprintf('Failed finding a matching JSON Web Key using algorithm %s.', $algorithm), 1559213507);
+    }
+
+    /**
+     * A key is suitable if it is an RSA key meant for verifying signatures and does not declare a different algorithm
+     *
+     * @see https://tools.ietf.org/html/rfc7517#section-4
+     */
+    private static function isKeySuitableForAlgorithm(mixed $key, string $algorithm): bool
+    {
+        if (!is_array($key) || ($key['kty'] ?? null) !== 'RSA' || !is_string($key['n'] ?? null) || !is_string($key['e'] ?? null)) {
+            return false;
+        }
+        if (isset($key['use']) && $key['use'] !== 'sig') {
+            return false;
+        }
+        if (isset($key['key_ops']) && (!is_array($key['key_ops']) || !in_array('verify', $key['key_ops'], true))) {
+            return false;
+        }
+        return !isset($key['alg']) || $key['alg'] === $algorithm;
     }
 
     /**

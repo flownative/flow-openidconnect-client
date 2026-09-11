@@ -77,6 +77,90 @@ class IdentityTokenTest extends TestCase
         static::assertTrue($identityToken->isExpiredAt(\DateTimeImmutable::createFromFormat('d.m.Y H:i:s', '31.05.2019 09:00:00')));
     }
 
+    #[Test]
+    public function isExpiredAtTreatsTokenWithoutExpirationTimeAsExpired(): void
+    {
+        $identityToken = IdentityToken::fromJwt(self::createUnsignedJwt(['iss' => 'https://id.example.com', 'sub' => 'subject']));
+
+        static::assertTrue($identityToken->isExpiredAt(new \DateTimeImmutable('2000-01-01')));
+    }
+
+    public static function notYetValidClaims(): array
+    {
+        $now = 1789000000;
+        return [
+            'no time claims' => [[], $now, false],
+            'issued in the past' => [['iat' => $now - 10], $now, false],
+            'issued now' => [['iat' => $now], $now, false],
+            'issued in the future' => [['iat' => $now + 10], $now, true],
+            'valid since the past' => [['nbf' => $now - 10], $now, false],
+            'valid in the future' => [['nbf' => $now + 10], $now, true],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('notYetValidClaims')]
+    public function isNotYetValidAtChecksIssuedAtAndNotBefore(array $claims, int $now, bool $expectedResult): void
+    {
+        $identityToken = IdentityToken::fromJwt(self::createUnsignedJwt(array_merge(['sub' => 'subject', 'exp' => $now + 3600], $claims)));
+
+        static::assertSame($expectedResult, $identityToken->isNotYetValidAt(new \DateTimeImmutable('@' . $now)));
+    }
+
+    #[Test]
+    public function isIssuedByComparesIssuerStrictly(): void
+    {
+        $identityToken = IdentityToken::fromJwt(self::createUnsignedJwt(['iss' => 'https://id.example.com/', 'sub' => 'subject']));
+
+        static::assertTrue($identityToken->isIssuedBy('https://id.example.com/'));
+        static::assertFalse($identityToken->isIssuedBy('https://id.example.com'));
+    }
+
+    #[Test]
+    public function fromJwtRejectsUnparseableTimeClaims(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionCode(1789122174);
+        IdentityToken::fromJwt(self::createUnsignedJwt(['sub' => 'subject', 'exp' => 'tomorrow']));
+    }
+
+    public static function invalidTimeClaimTypes(): array
+    {
+        return [
+            'null' => [null],
+            'boolean' => [true],
+            'list' => [[1789000000]],
+            'object' => [['time' => 1789000000]],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('invalidTimeClaimTypes')]
+    public function fromJwtRejectsTimeClaimsOfInvalidType(mixed $expirationTime): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionCode(1789122174);
+        IdentityToken::fromJwt(self::createUnsignedJwt(['sub' => 'subject', 'exp' => $expirationTime]));
+    }
+
+    #[Test]
+    public function fromJwtRejectsPartsWhichCannotBeDecodedStrictly(): void
+    {
+        [, $claims, $signature] = explode('.', self::createUnsignedJwt(['sub' => 'subject', 'exp' => 1789000000]));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionCode(1789122174);
+        IdentityToken::fromJwt('eyJhbGciOiJSUzI1NiIgfQ==.' . $claims . '.' . $signature);
+    }
+
+    #[Test]
+    public function fromJwtRejectsCriticalHeaderExtensions(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionCode(1789123616);
+        IdentityToken::fromJwt(self::createUnsignedJwt(['sub' => 'subject'], ['typ' => 'JWT', 'alg' => 'RS256', 'crit' => ['b64'], 'b64' => false]));
+    }
+
     public static function audiences(): array
     {
         return [
@@ -87,6 +171,7 @@ class IdentityTokenTest extends TestCase
             'empty list of audiences' => [[], 'client-a', false],
             'numeric audience compared strictly' => [['1e3'], '1000', false],
             'no audience' => [null, 'client-a', false],
+            'object instead of list' => [['x' => 'client-a'], 'client-a', false],
         ];
     }
 
@@ -103,9 +188,9 @@ class IdentityTokenTest extends TestCase
         static::assertSame($expectedResult, $identityToken->audienceContains($audience));
     }
 
-    private static function createUnsignedJwt(array $values): string
+    private static function createUnsignedJwt(array $values, array $header = ['typ' => 'JWT', 'alg' => 'RS256']): string
     {
         $encode = static fn (string $data): string => rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
-        return $encode(json_encode(['typ' => 'JWT', 'alg' => 'RS256'])) . '.' . $encode(json_encode($values)) . '.' . $encode('signature');
+        return $encode(json_encode($header)) . '.' . $encode(json_encode($values)) . '.' . $encode('signature');
     }
 }

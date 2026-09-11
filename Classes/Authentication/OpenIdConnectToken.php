@@ -74,23 +74,29 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
             if (!isset($this->queryParameters[$authorizationIdQueryParameterName])) {
                 throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', $authorizationIdQueryParameterName), 1560350311);
             }
+            $signedTokenArguments = $this->queryParameters[self::OIDC_PARAMETER_NAME];
+            $authorizationIdentifier = $this->queryParameters[$authorizationIdQueryParameterName];
+            if (!is_string($signedTokenArguments) || !is_string($authorizationIdentifier)) {
+                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
+                throw new AccessDeniedException('The OpenID Connect query parameters are not strings', 1789122178);
+            }
             try {
-                $tokenArguments = TokenArguments::fromSignedString($this->queryParameters[self::OIDC_PARAMETER_NAME], $this->hashService);
+                $tokenArguments = TokenArguments::fromSignedString($signedTokenArguments, $this->hashService);
             } catch (InvalidArgumentException $exception) {
                 $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
                 throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
             }
 
-            $authorizationIdentifier = $this->queryParameters[$authorizationIdQueryParameterName];
-            $client = $this->openIdConnectClientFactory->create($tokenArguments[TokenArguments::SERVICE_NAME]);
-
+            // Creating the client may already contact the identity provider for discovery. The messages of the caught
+            // exceptions may contain the authorization identifier from the query, so they are not repeated here.
             try {
+                $client = $this->openIdConnectClientFactory->create($tokenArguments[TokenArguments::SERVICE_NAME]);
                 $tokenSet = $client->getIdentityToken($authorizationIdentifier);
                 $identityToken = $tokenSet->identityToken;
                 $this->refreshToken = $tokenSet->refreshToken;
                 $client->removeAuthorization($authorizationIdentifier);
             } catch (ServiceException | ConnectionException $exception) {
-                throw new AccessDeniedException(sprintf('Could not extract identity token for authorization identifier "%s": %s', $authorizationIdentifier, $exception->getMessage()), 1560350413, $exception);
+                throw new AccessDeniedException('Could not retrieve the identity token of the finished authorization', 1560350413, $exception);
             }
         } else {
             $identityToken = $this->extractIdentityTokenFromCookie($cookieName);

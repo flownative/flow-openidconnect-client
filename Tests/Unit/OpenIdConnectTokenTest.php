@@ -214,6 +214,41 @@ class OpenIdConnectTokenTest extends TestCase
         static::assertSame(TokenInterface::WRONG_CREDENTIALS, $token->getAuthenticationStatus());
     }
 
+    #[Test]
+    public function extractIdentityTokenFromRequestDeniesAccessIfQueryParametersAreNotStrings(): void
+    {
+        $hashService = OpenIdConnectClientFixture::createHashService();
+        $queryParameters = self::createReturnQueryParameters($hashService);
+        $queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME] = [$queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME]];
+
+        $token = $this->createTokenWithClient($this->createStub(OAuthClient::class), $hashService);
+        $token->updateCredentials(self::createActionRequest(queryParameters: $queryParameters));
+
+        try {
+            $token->extractIdentityTokenFromRequest(self::COOKIE_NAME);
+            static::fail('Expected an AccessDeniedException');
+        } catch (AccessDeniedException $exception) {
+            static::assertSame(1789122178, $exception->getCode());
+        }
+        static::assertSame(TokenInterface::WRONG_CREDENTIALS, $token->getAuthenticationStatus());
+    }
+
+    #[Test]
+    public function extractIdentityTokenFromRequestDeniesAccessIfClientCannotBeCreated(): void
+    {
+        $hashService = OpenIdConnectClientFixture::createHashService();
+        $clientFactory = $this->createStub(OpenIdConnectClientFactory::class);
+        $clientFactory->method('create')->willThrowException(new ConnectionException('OpenID Connect Client: Failed discovering options', 1554902567));
+        $token = new OpenIdConnectToken();
+        OpenIdConnectClientFixture::inject($token, 'openIdConnectClientFactory', $clientFactory);
+        OpenIdConnectClientFixture::inject($token, 'hashService', $hashService);
+        $token->updateCredentials(self::createActionRequest(queryParameters: self::createReturnQueryParameters($hashService)));
+
+        $this->expectException(AccessDeniedException::class);
+        $this->expectExceptionCode(1560350413);
+        $token->extractIdentityTokenFromRequest(self::COOKIE_NAME);
+    }
+
     private function createTokenWithClient(OAuthClient $oAuthClient, HashService $hashService): OpenIdConnectToken
     {
         $client = OpenIdConnectClientFixture::createClient($oAuthClient, $hashService, $this->createStub(LoggerInterface::class));

@@ -81,6 +81,32 @@ class IdentityTokenSignatureTest extends TestCase
     }
 
     #[Test]
+    public function hasValidSignatureIgnoresKeysWithoutIdentifierIfTokenNamesOne(): void
+    {
+        $identityToken = IdentityToken::fromJwt(self::createSignedJwt('RS256', 'key-1', self::$signingKey));
+        $keyWithoutIdentifier = self::createJwk(self::$signingKey, 'unused');
+        unset($keyWithoutIdentifier['kid']);
+        $jwks = [
+            $keyWithoutIdentifier,
+            self::createJwk(self::$otherKey, 'key-1'),
+        ];
+
+        static::assertFalse($identityToken->hasValidSignature($jwks));
+    }
+
+    #[Test]
+    public function hasValidSignatureTriesAllSuitableKeysIfTokenNamesNoKeyIdentifier(): void
+    {
+        $identityToken = IdentityToken::fromJwt(self::createSignedJwt('RS256', null, self::$signingKey));
+        $jwks = [
+            self::createJwk(self::$otherKey, 'key-1'),
+            self::createJwk(self::$signingKey, 'key-2'),
+        ];
+
+        static::assertTrue($identityToken->hasValidSignature($jwks));
+    }
+
+    #[Test]
     public function hasValidSignatureThrowsExceptionIfNoKeyMatchesKeyIdentifier(): void
     {
         $identityToken = IdentityToken::fromJwt(self::createSignedJwt('RS256', 'unknown-key', self::$signingKey));
@@ -88,6 +114,39 @@ class IdentityTokenSignatureTest extends TestCase
         $this->expectException(ServiceException::class);
         $this->expectExceptionCode(1559213482);
         $identityToken->hasValidSignature([self::createJwk(self::$signingKey, 'key-1')]);
+    }
+
+    #[Test]
+    public function hasValidSignatureAcceptsKeyWithoutUsageAndAlgorithm(): void
+    {
+        $identityToken = IdentityToken::fromJwt(self::createSignedJwt('RS256', 'key-1', self::$signingKey));
+        $jwk = self::createJwk(self::$signingKey, 'key-1');
+        unset($jwk['use'], $jwk['alg']);
+
+        static::assertTrue($identityToken->hasValidSignature([$jwk]));
+    }
+
+    public static function unsuitableKeyProperties(): array
+    {
+        return [
+            'meant for encryption' => [['use' => 'enc']],
+            'without verify operation' => [['key_ops' => ['encrypt']]],
+            'for another algorithm' => [['alg' => 'RS512']],
+            'of another key type' => [['kty' => 'EC']],
+            'without modulus' => [['n' => null]],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('unsuitableKeyProperties')]
+    public function hasValidSignatureIgnoresUnsuitableKeys(array $keyProperties): void
+    {
+        $identityToken = IdentityToken::fromJwt(self::createSignedJwt('RS256', 'key-1', self::$signingKey));
+        $jwk = array_filter(array_merge(self::createJwk(self::$signingKey, 'key-1'), $keyProperties), static fn (mixed $value): bool => $value !== null);
+
+        $this->expectException(ServiceException::class);
+        $this->expectExceptionCode(1559213482);
+        $identityToken->hasValidSignature([$jwk, 'not a key']);
     }
 
     public static function unsupportedAlgorithms(): array
@@ -112,21 +171,32 @@ class IdentityTokenSignatureTest extends TestCase
         $identityToken->hasValidSignature([self::createJwk(self::$signingKey, 'key-1')]);
     }
 
-    #[Test]
-    public function hasValidSignatureThrowsExceptionForKeyWithoutModulus(): void
+    public static function invalidHeaders(): array
     {
-        $identityToken = IdentityToken::fromJwt(self::createSignedJwt('RS256', 'key-1', self::$signingKey));
-        $jwk = self::createJwk(self::$signingKey, 'key-1');
-        unset($jwk['n']);
-
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionCode(1559214667);
-        $identityToken->hasValidSignature([$jwk]);
+        return [
+            'algorithm is not a string' => [['alg' => ['RS256']], 1789122172],
+            'key identifier is not a string' => [['alg' => 'RS256', 'kid' => ['key-1']], 1789122173],
+        ];
     }
 
-    private static function createSignedJwt(string $algorithm, string $keyIdentifier, PrivateKey $privateKey): string
+    #[Test]
+    #[DataProvider('invalidHeaders')]
+    public function fromJwtRejectsInvalidHeaderValues(array $header, int $expectedExceptionCode): void
     {
-        $header = self::base64UrlEncode(json_encode(['typ' => 'JWT', 'alg' => $algorithm, 'kid' => $keyIdentifier]));
+        [, $claims, $signature] = explode('.', self::createSignedJwt('RS256', 'key-1', self::$signingKey));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionCode($expectedExceptionCode);
+        IdentityToken::fromJwt(self::base64UrlEncode(json_encode($header)) . '.' . $claims . '.' . $signature);
+    }
+
+    private static function createSignedJwt(string $algorithm, ?string $keyIdentifier, PrivateKey $privateKey): string
+    {
+        $headerValues = ['typ' => 'JWT', 'alg' => $algorithm];
+        if ($keyIdentifier !== null) {
+            $headerValues['kid'] = $keyIdentifier;
+        }
+        $header = self::base64UrlEncode(json_encode($headerValues));
         $claims = self::base64UrlEncode(json_encode(['iss' => 'https://id.example.com', 'sub' => 'subject', 'exp' => time() + 3600]));
         $signature = $privateKey
             ->withHash('sha' . substr($algorithm, 2))

@@ -31,12 +31,16 @@ use ReflectionProperty;
 final class OpenIdConnectClientFixture
 {
     public const string SERVICE_NAME = 'test';
+    public const string ISSUER = 'https://id.example.com/';
     public const string JWKS_URI = 'https://id.example.com/.well-known/jwks.json';
     public const string TOKEN_ENDPOINT = 'https://id.example.com/oauth/token';
     public const string CLIENT_ID = 'the-client';
     public const string CLIENT_SECRET = 'the-secret';
 
-    public static function createClient(OAuthClient $oAuthClient, HashService $hashService, LoggerInterface $logger, array $jwks = [], ?HttpClient $httpClient = null): OpenIdConnectClient
+    /**
+     * @param array $serviceOptions Options which replace the default options of the test service
+     */
+    public static function createClient(OAuthClient $oAuthClient, HashService $hashService, LoggerInterface $logger, array $jwks = [], ?HttpClient $httpClient = null, array $serviceOptions = []): OpenIdConnectClient
     {
         $discoveryCache = new VariableFrontend('discovery', new TransientMemoryBackend());
         $discoveryCache->initializeObject();
@@ -50,12 +54,13 @@ final class OpenIdConnectClientFixture
         self::inject($client, 'settings', [
             'services' => [
                 self::SERVICE_NAME => [
-                    'options' => [
+                    'options' => array_merge([
+                        'issuer' => self::ISSUER,
                         'jwksUri' => self::JWKS_URI,
                         'tokenEndpoint' => self::TOKEN_ENDPOINT,
                         'clientId' => self::CLIENT_ID,
                         'clientSecret' => self::CLIENT_SECRET,
-                    ]
+                    ], $serviceOptions)
                 ]
             ]
         ]);

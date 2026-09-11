@@ -533,20 +533,71 @@ that case roles from claims and existing accounts will be merged.
 
 Again, check logs for hints if things are not working as expected.
 
-## More Authentication Provider Options
+## Token Validation
 
-When you are using the OpenID Connect Authentication Provider, you can
-provide options for additional security measures.
+The authentication provider only accepts a token if all of the following
+checks pass:
 
-### Audience Pinning
+- the signature is valid and was created with a key of the identity
+  provider
+- the token was issued by the issuer of the configured service ("iss")
+- the token was issued for the audience of your application ("aud")
+- the token is not expired ("exp") and already valid ("nbf", "iat")
+- the claim used as account identifier is present
 
-It is recommended to specify the "audience" identifier of your
-application. That way, tokens issued by your identity provider will only
-accepted for authentication, if the audience string of the token ("aud")
-matches the string configured in your application. Without this
-configuration, your application would accept any token of your identity
-provider, if it has a valid signature and comes with the correct roles
-claim.
+Tokens which fail a check are rejected and the reason is written to the
+security log.
+
+### Issuer
+
+The expected issuer is taken from the discovery document of the service.
+If you don't use discovery, configure it explicitly:
+
+```yaml
+Flownative:
+  OpenIdConnect:
+    Client:
+      services:
+        myService:
+          options:
+            issuer: 'https://id.example.com/'
+            jwksUri: 'https://id.example.com/.well-known/jwks.json'
+```
+
+Some identity providers issue tokens with a different issuer than the
+one published in their discovery document. Examples are version 1
+access tokens of Microsoft Entra ID, or a Keycloak server whose
+discovery document is retrieved through an internal address. In that
+case, set the expected issuer in the provider options. It takes
+precedence over the issuer of the service and may be a list:
+
+```
+…
+                providerOptions:
+                  issuer:
+                    - 'https://login.microsoftonline.com/{tenantid}/v2.0'
+                    - 'https://sts.windows.net/{tenantid}/'
+                  …
+```
+
+Multi-tenant applications of Microsoft Entra ID use an issuer containing
+the placeholder "{tenantid}". It is replaced by the "tid" claim of each
+token, so tokens of all tenants are accepted as long as they are issued
+for your application. Users of any tenant can then log in, so restrict
+access through roles, and don't use a claim like "email" as account
+identifier, because it is not unique across tenants.
+
+### Audience
+
+By default, a token must contain the client id of the service in its
+"aud" claim. This is what identity providers put into identity tokens
+issued for your application.
+
+Access tokens for an API usually carry the identifier of that API
+instead. In that case, configure the expected audience explicitly. You
+may also specify a list, and a token must contain at least one of them.
+Keycloak only adds an audience to access tokens if the client has an
+audience mapper.
 
 ```
 …
@@ -558,6 +609,20 @@ claim.
                 provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
                 providerOptions:
                   audience: 'https://www.example.com/my-application'
+                  …
+```
+
+### Clock Leeway
+
+The clocks of your application and the identity provider may differ
+slightly. When checking the time claims of a token, the provider allows
+a difference of 60 seconds by default. You can change it with the
+"leeway" option:
+
+```
+…
+                providerOptions:
+                  leeway: 30
                   …
 ```
 
