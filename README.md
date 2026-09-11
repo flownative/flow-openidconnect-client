@@ -287,7 +287,7 @@ Neos:
             entryPoint: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectEntryPoint'
             entryPointOptions:
               serviceName: 'test'
-              scopes: ['sub', 'profile', 'name']
+              scope: 'profile name'
 
         authenticationStrategy: atLeastOneToken
 
@@ -296,6 +296,27 @@ Neos:
 Without further programming you need to manually create a Neos user
 which has the same username as the one provided in the "sub" claim by
 the OIDC identity provider.
+
+### Refreshing expired identity tokens
+
+The entry point requests the scope "offline_access" in addition to
+"openid" and the configured scope. With this scope, identity providers
+like Auth0 or Microsoft Entra ID issue a refresh token. The refresh
+token is stored in the user's session and is used to refresh an
+expired identity token without an interactive login.
+
+Some identity providers treat this scope differently. Google rejects
+it with an "invalid_scope" error. Keycloak issues an offline token
+which does not expire with the SSO session. If you don't need refresh
+tokens, or your identity provider does not support the scope, disable
+it in the entry point options:
+
+```yaml
+            entryPointOptions:
+              serviceName: 'test'
+              scope: 'profile name'
+              requestRefreshToken: false
+```
 
 Note: Check the [Flownative.OpenidConnect.Neos](https://github.com/flownative/openidconnect-neos) package for a working implementation.
 

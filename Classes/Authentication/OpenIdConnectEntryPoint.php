@@ -36,7 +36,7 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
 
         $client = new OpenIdConnectClient($this->options['serviceName']);
         try {
-            $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '');
+            $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '', $this->options['requestRefreshToken'] ?? true);
         } catch (OAuthClientException | ServiceException $exception) {
             $this->logger->error(sprintf('OpenID Connect: Authentication for service "%s" failed: %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return $response;
@@ -58,6 +58,9 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         }
         if (isset($this->options['scope']) && !is_string($this->options['scope'])) {
             throw new ConfigurationException('OpenID Connect: "scope" option was not configured correctly for OpenIdConnectEntryPoint', 1560259102);
+        }
+        if (isset($this->options['requestRefreshToken']) && !is_bool($this->options['requestRefreshToken'])) {
+            throw new ConfigurationException('OpenID Connect: "requestRefreshToken" option must be a boolean for OpenIdConnectEntryPoint', 1789108753);
         }
     }
 

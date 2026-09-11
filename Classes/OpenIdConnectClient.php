@@ -208,21 +208,21 @@ final class OpenIdConnectClient
      * This method is an interactive authorization, which usually requires a browser to work.
      *
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
+     * @param bool $requestRefreshToken If "offline_access" should be requested, so that an expired identity token can be refreshed
      * @throws OAuthClientException
      */
-    public function startAuthorization(UriInterface $returnToUri, string $scope): UriInterface
+    public function startAuthorization(UriInterface $returnToUri, string $scope, bool $requestRefreshToken = true): UriInterface
     {
         $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $this->serviceName]);
         if (str_starts_with($returnArguments, 'ERROR')) {
             throw new \RuntimeException(substr($returnArguments, 6));
         }
         $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
-        $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid', 'offline_access']))));
 
         if (empty($this->options['clientId']) || empty($this->options['clientSecret'])) {
             throw new \RuntimeException(sprintf('OpenID Connect Client: Authorization Code Flow requires "clientId" and "clientSecret" to be configured for service "%s".', $this->serviceName), 1596456168);
         }
-        return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $scope);
+        return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $this->buildAuthorizationScope($scope, $requestRefreshToken));
     }
 
     /**
@@ -378,5 +378,11 @@ final class OpenIdConnectClient
             throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving oAuth token %s: %s', $authorizationIdentifier, $exception->getMessage()), 1559202394);
         }
         return $authorization;
+    }
+
+    private function buildAuthorizationScope(string $scope, bool $requestRefreshToken): string
+    {
+        $requiredScopeIdentifiers = $requestRefreshToken ? ['openid', 'offline_access'] : ['openid'];
+        return trim(implode(' ', array_unique(array_merge(explode(' ', $scope), $requiredScopeIdentifiers))));
     }
 }

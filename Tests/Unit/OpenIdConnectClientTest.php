@@ -200,6 +200,31 @@ class OpenIdConnectClientTest extends TestCase
         static::assertSame($expectedAccessToken->getExpires(), $actualAccessToken->getExpires());
     }
 
+    public static function authorizationScopes(): array
+    {
+        return [
+            'empty scope with refresh token' => ['', true, 'openid offline_access'],
+            'empty scope without refresh token' => ['', false, 'openid'],
+            'custom scope with refresh token' => ['profile email', true, 'profile email openid offline_access'],
+            'custom scope without refresh token' => ['profile email', false, 'profile email openid'],
+            'duplicate identifiers are removed' => ['openid offline_access', true, 'openid offline_access'],
+            'explicit offline_access is kept' => ['profile offline_access', false, 'profile offline_access openid'],
+        ];
+    }
+
+    /**
+     * @test
+     * @dataProvider authorizationScopes
+     * @throws
+     */
+    public function buildAuthorizationScopeAddsRequiredScopeIdentifiers(string $scope, bool $requestRefreshToken, string $expectedScope): void
+    {
+        $method = new \ReflectionMethod(OpenIdConnectClient::class, 'buildAuthorizationScope');
+        $method->setAccessible(true);
+
+        static::assertSame($expectedScope, $method->invoke($this->oidcClient, $scope, $requestRefreshToken));
+    }
+
     /**
      * Injects $dependency into property $name of $target
      *
