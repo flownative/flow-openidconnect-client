@@ -262,11 +262,9 @@ Flownative:
             clientId: 'abcdefghijklmnopqrstuvwxyz01234567890'
             clientSecret: 'YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU2Nzg5MA=='
       middleware:
-        cookie:      
+        cookie:
           # For testing purposes allow cookies without HTTPS:
           secure: false
-          # Create an HTTP only cookie for increased security
-          httpOnly: true
 
 Neos:
   Flow:
@@ -296,6 +294,26 @@ Neos:
 Without further programming you need to manually create a Neos user
 which has the same username as the one provided in the "sub" claim by
 the OIDC identity provider.
+
+### JWT Cookie
+
+After a successful login, the middleware stores the identity token in a
+cookie, so that the browser sends it with the following requests. By
+default, the cookie is only sent over HTTPS ("secure") and cannot be
+read by JavaScript ("httpOnly").
+
+The middleware renews the cookie with every response to a logged-in
+user. These responses are marked as private, so that shared caches
+like proxies or CDNs don't store them. For the same reason, the
+middleware removes the headers "CDN-Cache-Control" and
+"Surrogate-Control" from these responses.
+
+Requests with a bearer token in the "Authorization" header neither set
+nor remove the cookie, because the client manages the token itself.
+
+Only set "httpOnly" to false if your frontend needs to read the token
+from the cookie. Every script running on your pages, including injected
+ones, can then read the token as well.
 
 ### Refreshing expired identity tokens
 

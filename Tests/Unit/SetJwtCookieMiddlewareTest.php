@@ -16,7 +16,10 @@ namespace Flownative\OpenIdConnect\Client;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Http\SetJwtCookieMiddleware;
 use GuzzleHttp\Psr7\Response;
+use GuzzleHttp\Psr7\ServerRequest;
 use GuzzleHttp\Psr7\Uri;
+use Neos\Flow\Http\Helper\ResponseInformationHelper;
+use Neos\Flow\Mvc\ActionRequest;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\Context as SecurityContext;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -99,6 +102,39 @@ class SetJwtCookieMiddlewareTest extends TestCase
         $this->mockNextRequestHandler->originalResponse = $this->mockOriginalResponse;
     }
 
+    private function givenAuthenticatedAccount(): void
+    {
+        $this->mockSecurityContext->method('isInitialized')->willReturn(true);
+        $account = $this->createStub(Account::class);
+        $account->method('getCredentialsSource')->willReturn(self::JWT_NODY);
+        $this->mockSecurityContext->method('getAccountByAuthenticationProviderName')->willReturn($account);
+    }
+
+    private static function createTokenForRequest(array $headers = [], array $cookies = []): OpenIdConnectToken
+    {
+        $token = new OpenIdConnectToken();
+        $token->setAuthenticationProviderName('SomeProvider');
+        $token->updateCredentials(ActionRequest::fromHttpRequest((new ServerRequest('GET', 'https://www.example.com/', $headers))->withCookieParams($cookies)));
+        return $token;
+    }
+
+    private static function createResponseWithCacheHeaders(string|array|null $cacheControl): ResponseInterface
+    {
+        $headers = ['CDN-Cache-Control' => 'max-age=600', 'Surrogate-Control' => 'max-age=600'];
+        if ($cacheControl !== null) {
+            $headers['Cache-Control'] = $cacheControl;
+        }
+        return new Response(200, $headers);
+    }
+
+    /**
+     * Applies what Flow's StandardsComplianceMiddleware does after all other middlewares, so that tests see the headers a client receives
+     */
+    private static function sendResponse(ResponseInterface $response): ResponseInterface
+    {
+        return ResponseInformationHelper::makeStandardsCompliant($response, new ServerRequest('GET', 'https://www.example.com/'));
+    }
+
     private function getMiddleware(array $options = [], array $authenticationProviderConfiguration = []): SetJwtCookieMiddleware
     {
         $middleware = new SetJwtCookieMiddleware($options, $authenticationProviderConfiguration, $this->mockSecurityContext, $this->mockLogger);
@@ -133,21 +169,21 @@ class SetJwtCookieMiddlewareTest extends TestCase
             'authenticated, no active cookie' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => [], 'expectedCookieHeader' => null],
             'authenticated, different active cookie name' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeOtherCookie'], 'expectedCookieHeader' => null],
 
-            'authenticated, default options' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax'],
-            'two authenticated tokens, default options' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider', 'SomeOtherProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax, flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax'],
-            'option cookie.name' => ['options' => ['cookie' => ['name' => 'SomeCookieName']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax'],
-            'option cookie.secure' => ['options' => ['cookie' => ['secure' => false]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; SameSite=lax'],
-            'option cookie.httpOnly' => ['options' => ['cookie' => ['httpOnly' => true]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'],
-            'option cookie.sameSite' => ['options' => ['cookie' => ['sameSite' => 'lax']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax'],
+            'authenticated, default options' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'two authenticated tokens, default options' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider', 'SomeOtherProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax, flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'option cookie.name' => ['options' => ['cookie' => ['name' => 'SomeCookieName']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'option cookie.secure' => ['options' => ['cookie' => ['secure' => false]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; HttpOnly; SameSite=lax'],
+            'option cookie.httpOnly' => ['options' => ['cookie' => ['httpOnly' => false]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax'],
+            'option cookie.sameSite' => ['options' => ['cookie' => ['sameSite' => 'lax']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'],
 
-            'option.secureCookie (compat)' => ['options' => ['secureCookie' => false], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; SameSite=lax'],
-            'option.secureCookie (compat) overrides cookie.secure' => ['options' => ['secureCookie' => false, 'cookie' => ['secure' => true]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; SameSite=lax'],
+            'option.secureCookie (compat)' => ['options' => ['secureCookie' => false], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; HttpOnly; SameSite=lax'],
+            'option.secureCookie (compat) overrides cookie.secure' => ['options' => ['secureCookie' => false, 'cookie' => ['secure' => true]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; HttpOnly; SameSite=lax'],
 
-            'option.cookieName (compat)' => ['options' => ['cookieName' => 'SomeCookieName'], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax'],
-            'option.cookieName (compat) overrides cookie.name' => ['options' => ['cookieName' => 'SomeCookieName', 'cookie' => ['name' => 'SomeOtherCookieName']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax'],
-            'providerOption.jwtCookieName overrides cookie name options' => ['options' => ['cookieName' => 'SomeCookieName', 'cookie' => ['name' => 'SomeOtherCookieName']], 'authenticationProviderConfiguration' => ['SomeProvider' => ['providerOptions' => ['jwtCookieName' => 'ProviderCookieName']]], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName', 'SomeOtherCookieName', 'ProviderCookieName'], 'expectedCookieHeader' => 'ProviderCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax'],
+            'option.cookieName (compat)' => ['options' => ['cookieName' => 'SomeCookieName'], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'option.cookieName (compat) overrides cookie.name' => ['options' => ['cookieName' => 'SomeCookieName', 'cookie' => ['name' => 'SomeOtherCookieName']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'providerOption.jwtCookieName overrides cookie name options' => ['options' => ['cookieName' => 'SomeCookieName', 'cookie' => ['name' => 'SomeOtherCookieName']], 'authenticationProviderConfiguration' => ['SomeProvider' => ['providerOptions' => ['jwtCookieName' => 'ProviderCookieName']]], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName', 'SomeOtherCookieName', 'ProviderCookieName'], 'expectedCookieHeader' => 'ProviderCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'],
 
-            'two authenticated tokens with different cookie names' => [[], 'authenticationProviderConfiguration' => ['SomeProvider' => ['providerOptions' => ['jwtCookieName' => 'ProviderCookieName']]], 'authenticatedTokens' => ['SomeProvider', 'SomeOtherProvider'], 'activeCookies' => ['flownative_oidc_jwt', 'ProviderCookieName'], 'expectedCookieHeader' => 'ProviderCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax, flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; SameSite=lax'],
+            'two authenticated tokens with different cookie names' => [[], 'authenticationProviderConfiguration' => ['SomeProvider' => ['providerOptions' => ['jwtCookieName' => 'ProviderCookieName']]], 'authenticatedTokens' => ['SomeProvider', 'SomeOtherProvider'], 'activeCookies' => ['flownative_oidc_jwt', 'ProviderCookieName'], 'expectedCookieHeader' => 'ProviderCookieName=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax, flownative_oidc_jwt=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'],
         ];
     }
 
@@ -180,24 +216,24 @@ class SetJwtCookieMiddlewareTest extends TestCase
         $jwt = self::JWT_NODY;
         return [
             'no authenticated tokens' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => [], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => null],
-            'authenticated, no active cookie' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => [], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax'],
-            'authenticated, different active cookie name' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeOtherCookie'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax'],
+            'authenticated, no active cookie' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => [], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'authenticated, different active cookie name' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeOtherCookie'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
 
-            'authenticated, default options' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax'],
-            'two authenticated tokens, default options' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider', 'SomeOtherProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax, flownative_oidc_jwt=' . self::JWT_JODY . '; Path=/; Secure; SameSite=lax'],
-            'option cookie.name' => ['options' => ['cookie' => ['name' => 'SomeCookieName']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax'],
-            'option cookie.secure' => ['options' => ['cookie' => ['secure' => false]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; SameSite=lax'],
-            'option cookie.httpOnly' => ['options' => ['cookie' => ['httpOnly' => true]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
-            'option cookie.sameSite' => ['options' => ['cookie' => ['sameSite' => 'lax']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax'],
+            'authenticated, default options' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'two authenticated tokens, default options' => ['options' => [], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider', 'SomeOtherProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax, flownative_oidc_jwt=' . self::JWT_JODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'option cookie.name' => ['options' => ['cookie' => ['name' => 'SomeCookieName']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'option cookie.secure' => ['options' => ['cookie' => ['secure' => false]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; HttpOnly; SameSite=lax'],
+            'option cookie.httpOnly' => ['options' => ['cookie' => ['httpOnly' => false]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax'],
+            'option cookie.sameSite' => ['options' => ['cookie' => ['sameSite' => 'lax']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
 
-            'option.secureCookie (compat)' => ['options' => ['secureCookie' => false], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; SameSite=lax'],
-            'option.secureCookie (compat) overrides cookie.secure' => ['options' => ['secureCookie' => false, 'cookie' => ['secure' => true]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; SameSite=lax'],
+            'option.secureCookie (compat)' => ['options' => ['secureCookie' => false], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; HttpOnly; SameSite=lax'],
+            'option.secureCookie (compat) overrides cookie.secure' => ['options' => ['secureCookie' => false, 'cookie' => ['secure' => true]], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['flownative_oidc_jwt'], 'expectedCookieHeader' => 'flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; HttpOnly; SameSite=lax'],
 
-            'option.cookieName (compat)' => ['options' => ['cookieName' => 'SomeCookieName'], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax'],
-            'option.cookieName (compat) overrides cookie.name' => ['options' => ['cookieName' => 'SomeCookieName', 'cookie' => ['name' => 'SomeOtherCookieName']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax'],
-            'providerOption.jwtCookieName overrides cookie name options' => ['options' => ['cookieName' => 'SomeCookieName', 'cookie' => ['name' => 'SomeOtherCookieName']], 'authenticationProviderConfiguration' => ['SomeProvider' => ['providerOptions' => ['jwtCookieName' => 'ProviderCookieName']]], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName', 'SomeOtherCookieName', 'ProviderCookieName'], 'expectedCookieHeader' => 'ProviderCookieName=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax'],
+            'option.cookieName (compat)' => ['options' => ['cookieName' => 'SomeCookieName'], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'option.cookieName (compat) overrides cookie.name' => ['options' => ['cookieName' => 'SomeCookieName', 'cookie' => ['name' => 'SomeOtherCookieName']], 'authenticationProviderConfiguration' => [], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName'], 'expectedCookieHeader' => 'SomeCookieName=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
+            'providerOption.jwtCookieName overrides cookie name options' => ['options' => ['cookieName' => 'SomeCookieName', 'cookie' => ['name' => 'SomeOtherCookieName']], 'authenticationProviderConfiguration' => ['SomeProvider' => ['providerOptions' => ['jwtCookieName' => 'ProviderCookieName']]], 'authenticatedTokens' => ['SomeProvider'], 'activeCookies' => ['SomeCookieName', 'SomeOtherCookieName', 'ProviderCookieName'], 'expectedCookieHeader' => 'ProviderCookieName=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
 
-            'two authenticated tokens with different cookie names' => [[], 'authenticationProviderConfiguration' => ['SomeProvider' => ['providerOptions' => ['jwtCookieName' => 'ProviderCookieName']]], 'authenticatedTokens' => ['SomeProvider', 'SomeOtherProvider'], 'activeCookies' => ['flownative_oidc_jwt', 'ProviderCookieName'], 'expectedCookieHeader' => 'ProviderCookieName=' . self::JWT_NODY . '; Path=/; Secure; SameSite=lax, flownative_oidc_jwt=' . self::JWT_JODY . '; Path=/; Secure; SameSite=lax'],
+            'two authenticated tokens with different cookie names' => [[], 'authenticationProviderConfiguration' => ['SomeProvider' => ['providerOptions' => ['jwtCookieName' => 'ProviderCookieName']]], 'authenticatedTokens' => ['SomeProvider', 'SomeOtherProvider'], 'activeCookies' => ['flownative_oidc_jwt', 'ProviderCookieName'], 'expectedCookieHeader' => 'ProviderCookieName=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax, flownative_oidc_jwt=' . self::JWT_JODY . '; Path=/; Secure; HttpOnly; SameSite=lax'],
         ];
     }
 
@@ -253,6 +289,100 @@ class SetJwtCookieMiddlewareTest extends TestCase
         $this->mockNextRequestHandler->originalResponse = new Response();
         $response = $middleware->process($this->mockRequest, $this->mockNextRequestHandler);
         self::assertFalse($response->hasHeader('Set-Cookie'));
+    }
+
+    #[Test]
+    public function processSetsCookieForTokenFromCookie(): void
+    {
+        $middleware = $this->getMiddleware();
+        $this->givenAuthenticatedAccount();
+        $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([self::createTokenForRequest(cookies: ['flownative_oidc_jwt' => self::JWT_NODY])]);
+
+        $this->mockNextRequestHandler->originalResponse = new Response();
+        $response = $middleware->process($this->mockRequest, $this->mockNextRequestHandler);
+
+        self::assertSame('flownative_oidc_jwt=' . self::JWT_NODY . '; Path=/; Secure; HttpOnly; SameSite=lax', $response->getHeaderLine('Set-Cookie'));
+    }
+
+    #[Test]
+    public function processDoesNotSetCookieForBearerToken(): void
+    {
+        $middleware = $this->getMiddleware();
+        $this->givenAuthenticatedAccount();
+        $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([self::createTokenForRequest(headers: ['Authorization' => 'Bearer ' . self::JWT_NODY])]);
+
+        $this->mockNextRequestHandler->originalResponse = new Response();
+        $response = $middleware->process($this->mockRequest, $this->mockNextRequestHandler);
+
+        self::assertFalse($response->hasHeader('Set-Cookie'));
+        self::assertFalse($response->hasHeader('Cache-Control'));
+    }
+
+    #[Test]
+    public function processDoesNotRemoveCookieIfBearerTokenIsNotAuthenticated(): void
+    {
+        $middleware = $this->getMiddleware();
+        $this->mockSecurityContext->method('isInitialized')->willReturn(true);
+        $this->mockSecurityContext->method('getAccountByAuthenticationProviderName')->willReturn(null);
+        $cookies = ['flownative_oidc_jwt' => self::JWT_NODY];
+        $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([self::createTokenForRequest(headers: ['Authorization' => 'Bearer invalid'], cookies: $cookies)]);
+        $this->mockRequest->method('getCookieParams')->willReturn($cookies);
+
+        $this->mockNextRequestHandler->originalResponse = new Response();
+        $response = $middleware->process($this->mockRequest, $this->mockNextRequestHandler);
+
+        self::assertFalse($response->hasHeader('Set-Cookie'));
+    }
+
+    public static function cacheControlHeaders(): array
+    {
+        return [
+            'no cache control' => [null, 'private'],
+            'public' => ['public, max-age=600', 'private, max-age=600'],
+            'upper case' => ['PUBLIC, MAX-AGE=600', 'private, max-age=600'],
+            'several header lines' => [['public', 'max-age=600'], 'private, max-age=600'],
+            'lifetime for shared caches' => ['max-age=600, s-maxage=3600', 'private, max-age=600'],
+            'already private' => ['private, max-age=600', 'private, max-age=600'],
+            'private for single fields' => ['private="Set-Cookie", max-age=600', 'private, max-age=600'],
+            'no-store' => ['public, no-store', 'private, no-store'],
+            'no-cache' => ['no-cache', 'no-cache, no-store'],
+            'private and no-cache' => ['private, no-cache', 'no-cache, no-store'],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('cacheControlHeaders')]
+    public function processKeepsSharedCachesFromStoringResponseWhichSetsTheCookie(string|array|null $originalCacheControl, string $expectedCacheControl): void
+    {
+        $middleware = $this->getMiddleware();
+        $this->givenAuthenticatedAccount();
+        $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([self::createTokenForRequest()]);
+
+        $this->mockNextRequestHandler->originalResponse = self::createResponseWithCacheHeaders($originalCacheControl);
+        $response = self::sendResponse($middleware->process($this->mockRequest, $this->mockNextRequestHandler));
+
+        self::assertTrue($response->hasHeader('Set-Cookie'));
+        self::assertSame($expectedCacheControl, $response->getHeaderLine('Cache-Control'));
+        self::assertFalse($response->hasHeader('CDN-Cache-Control'));
+        self::assertFalse($response->hasHeader('Surrogate-Control'));
+    }
+
+    #[Test]
+    public function processKeepsSharedCachesFromStoringResponseWhichRemovesTheCookie(): void
+    {
+        $middleware = $this->getMiddleware();
+        $this->mockSecurityContext->method('isInitialized')->willReturn(true);
+        $this->mockSecurityContext->method('getAccountByAuthenticationProviderName')->willReturn(null);
+        $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([self::createTokenForRequest()]);
+        $this->mockRequest->method('getCookieParams')->willReturn(['flownative_oidc_jwt' => self::JWT_NODY]);
+
+        $this->mockNextRequestHandler->originalResponse = self::createResponseWithCacheHeaders('public, max-age=600');
+        $response = self::sendResponse($middleware->process($this->mockRequest, $this->mockNextRequestHandler));
+
+        self::assertTrue($response->hasHeader('Set-Cookie'));
+        self::assertSame('private, max-age=600', $response->getHeaderLine('Cache-Control'));
+        self::assertFalse($response->hasHeader('CDN-Cache-Control'));
+        self::assertFalse($response->hasHeader('Surrogate-Control'));
     }
 
     public static function removeOidcQueryParametersDataProvider(): array

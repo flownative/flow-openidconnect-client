@@ -45,6 +45,29 @@ class OpenIdConnectTokenTest extends TestCase
     }
 
     #[Test]
+    public function updateCredentialsDetectsBearerAuthorizationHeader(): void
+    {
+        $token = new OpenIdConnectToken();
+        $token->updateCredentials(self::createActionRequest(headers: ['Authorization' => 'Bearer not-a-jwt']));
+
+        static::assertTrue($token->hasBearerAuthorizationHeader());
+    }
+
+    #[Test]
+    public function updateCredentialsForgetsCredentialsOfPreviousRequest(): void
+    {
+        $token = new OpenIdConnectToken();
+        $token->updateCredentials(self::createActionRequest(headers: ['Authorization' => 'Bearer ' . self::createUnsignedJwt(['sub' => 'header-subject'])]));
+        OpenIdConnectClientFixture::inject($token, 'refreshToken', 'refresh-token-of-previous-request');
+
+        $token->updateCredentials(self::createActionRequest(cookies: [self::COOKIE_NAME => self::createUnsignedJwt(['sub' => 'cookie-subject'])]));
+
+        static::assertFalse($token->hasBearerAuthorizationHeader());
+        static::assertSame('', $token->getRefreshToken());
+        static::assertSame('cookie-subject', $token->extractIdentityTokenFromRequest(self::COOKIE_NAME)->values['sub']);
+    }
+
+    #[Test]
     public function extractIdentityTokenFromRequestReadsBearerTokenFromAuthorizationHeader(): void
     {
         $jwt = self::createUnsignedJwt(['sub' => 'header-subject']);
@@ -117,6 +140,7 @@ class OpenIdConnectTokenTest extends TestCase
             cookies: [self::COOKIE_NAME => $jwt]
         ));
 
+        static::assertFalse($token->hasBearerAuthorizationHeader());
         static::assertSame($jwt, $token->extractIdentityTokenFromRequest(self::COOKIE_NAME)->asJwt());
     }
 

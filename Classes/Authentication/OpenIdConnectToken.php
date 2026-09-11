@@ -33,6 +33,8 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
     protected string $refreshToken = '';
 
+    protected bool $bearerAuthorizationHeaderGiven = false;
+
     #[Flow\Inject]
     protected OpenIdConnectClientFactory $openIdConnectClientFactory;
 
@@ -47,12 +49,12 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
         $this->setAuthenticationStatus(self::AUTHENTICATION_NEEDED);
         $httpRequest = $actionRequest->getHttpRequest();
 
+        // Flow uses the same token instance for all requests handled by a process, so nothing of a previous request may remain
         $this->queryParameters = $httpRequest->getQueryParams();
         $this->cookies = $httpRequest->getCookieParams();
-
-        if ($httpRequest->hasHeader('Authorization')) {
-            $this->authorizationHeader = current($httpRequest->getHeader('Authorization'));
-        }
+        $this->authorizationHeader = $httpRequest->getHeader('Authorization')[0] ?? '';
+        $this->bearerAuthorizationHeaderGiven = str_contains($this->authorizationHeader, 'Bearer ');
+        $this->refreshToken = '';
     }
 
     /**
@@ -67,7 +69,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
      */
     public function extractIdentityTokenFromRequest(string $cookieName): IdentityToken
     {
-        if ($this->authorizationHeader !== '' && str_contains($this->authorizationHeader, 'Bearer ')) {
+        if ($this->bearerAuthorizationHeaderGiven) {
             $identityToken = $this->extractIdentityTokenFromAuthorizationHeader($this->authorizationHeader);
         } elseif (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
             $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
@@ -109,6 +111,14 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     public function getRefreshToken(): string
     {
         return $this->refreshToken;
+    }
+
+    /**
+     * Tells if the request carries a bearer token in the "Authorization" header. The identity token is then only read from this header, even if it is invalid.
+     */
+    public function hasBearerAuthorizationHeader(): bool
+    {
+        return $this->bearerAuthorizationHeaderGiven;
     }
 
     /**
