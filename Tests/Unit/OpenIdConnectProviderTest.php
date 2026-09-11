@@ -15,6 +15,7 @@ namespace Flownative\OpenIdConnect\Client;
 
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
+use Flownative\OpenIdConnect\Client\Authentication\StoredRefreshToken;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\JwtFixture;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\OpenIdConnectClientFixture;
 use GuzzleHttp\Client as HttpClient;
@@ -390,16 +391,17 @@ class OpenIdConnectProviderTest extends TestCase
     #[Test]
     public function authenticateRequiresAuthenticationForExpiredTokenWithoutRefreshToken(): void
     {
-        $token = self::createTokenForBearerJwt(self::createJwt(['exp' => time() - 600]));
+        $token = self::createTokenForCookieJwt(self::createJwt(['exp' => time() - 600]));
 
-        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(''))->authenticate($token);
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(null))->authenticate($token);
 
         self::assertNotAuthenticated($token, TokenInterface::AUTHENTICATION_NEEDED);
     }
 
     #[Test]
-    public function authenticateRefreshesExpiredTokenWithRefreshTokenFromSession(): void
+    public function authenticateRefreshesExpiredTokenWithRefreshTokenBoundToIt(): void
     {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
         $refreshedJwt = self::createJwt();
         $httpClient = $this->createMock(HttpClient::class);
         $httpClient->expects($this->once())
@@ -408,24 +410,226 @@ class OpenIdConnectProviderTest extends TestCase
                 static fn (array $options): bool => $options['form_params']['grant_type'] === 'refresh_token'
                     && $options['form_params']['refresh_token'] === 'the-refresh-token'
                     && $options['form_params']['client_id'] === OpenIdConnectClientFixture::CLIENT_ID
+                    && !isset($options['form_params']['id_token_hint'])
+                    && !isset($options['form_params']['prompt'])
             ))
             ->willReturn(new Response(200, [], json_encode(['id_token' => $refreshedJwt])));
-        $token = self::createTokenForBearerJwt(self::createJwt(['exp' => time() - 600]));
+        $token = self::createTokenForCookieJwt($expiredJwt);
 
-        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession('the-refresh-token'), httpClient: $httpClient)->authenticate($token);
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
+
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+        static::assertSame($refreshedJwt, $token->getAccount()->getCredentialsSource());
+    }
+
+    public static function refreshTokensInRefreshResponses(): array
+    {
+        return [
+            'identity provider rotates refresh tokens' => ['the-rotated-refresh-token', 'the-rotated-refresh-token'],
+            'identity provider keeps the refresh token' => [null, 'the-refresh-token'],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('refreshTokensInRefreshResponses')]
+    public function authenticateBindsStoredRefreshTokenToRefreshedIdentityToken(?string $refreshTokenInResponse, string $expectedRefreshToken): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $refreshedJwt = self::createJwt();
+        $responseData = ['id_token' => $refreshedJwt];
+        if ($refreshTokenInResponse !== null) {
+            $responseData['refresh_token'] = $refreshTokenInResponse;
+        }
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(new Response(200, [], json_encode($responseData)));
+        $storedSessionData = null;
+        $session = $this->createMock(SessionInterface::class);
+        $session->method('isStarted')->willReturn(true);
+        $session->method('getData')->willReturnMap([['flownative_oidc_refresh:SomeProvider', self::createStoredRefreshToken('the-refresh-token', $expiredJwt)]]);
+        $session->expects($this->once())->method('putData')->with('flownative_oidc_refresh:SomeProvider', $this->anything())->willReturnCallback(
+            static function (string $key, mixed $sessionData) use (&$storedSessionData): void {
+                $storedSessionData = $sessionData;
+            }
+        );
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $session, httpClient: $httpClient)->authenticate($token);
+
+        $storedRefreshToken = StoredRefreshToken::fromSessionData($storedSessionData);
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+        static::assertSame($expectedRefreshToken, $storedRefreshToken->refreshToken);
+        static::assertTrue($storedRefreshToken->isBoundTo(IdentityToken::fromJwt($refreshedJwt)));
+        static::assertTrue($storedRefreshToken->hasRecentlyReplaced(IdentityToken::fromJwt($expiredJwt), time()));
+    }
+
+    public static function storedRefreshTokensNotBoundToTheIdentityToken(): array
+    {
+        return [
+            'refresh token of another identity token of the same subject' => [self::createStoredRefreshToken('the-refresh-token', self::createJwt(['exp' => time() - 300]))],
+            'refresh token of another subject' => [self::createStoredRefreshToken('the-refresh-token', self::createJwt(['sub' => 'mallory', 'exp' => time() - 600]))],
+            'refresh token without identity token' => [['refreshToken' => 'the-refresh-token', 'refreshedAt' => 0]],
+            'refresh token stored by earlier versions' => ['the-refresh-token'],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('storedRefreshTokensNotBoundToTheIdentityToken')]
+    public function authenticateDoesNotUseRefreshTokenWhichIsNotBoundToTheIdentityToken(array|string $storedRefreshToken): void
+    {
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->never())->method('request');
+        $token = self::createTokenForCookieJwt(self::createJwt(['exp' => time() - 600]));
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession($storedRefreshToken), httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::AUTHENTICATION_NEEDED);
+    }
+
+    #[Test]
+    public function authenticateUsesIdentityTokenOfRecentRefreshForRequestWithPreviousIdentityToken(): void
+    {
+        $previousJwt = self::createJwt(['exp' => time() - 600]);
+        $refreshedJwt = self::createJwt();
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->never())->method('request');
+        $session = $this->createMock(SessionInterface::class);
+        $session->method('isStarted')->willReturn(true);
+        $session->method('getData')->willReturnMap([['flownative_oidc_refresh:SomeProvider', self::createRefreshedStoredRefreshToken($previousJwt, $refreshedJwt, time() - 60)]]);
+        $session->expects($this->never())->method('putData');
+        $token = self::createTokenForCookieJwt($previousJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $session, httpClient: $httpClient)->authenticate($token);
 
         static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
         static::assertSame($refreshedJwt, $token->getAccount()->getCredentialsSource());
     }
 
     #[Test]
+    public function authenticateDoesNotUseIdentityTokenOfRefreshWhichHappenedLongAgo(): void
+    {
+        $previousJwt = self::createJwt(['exp' => time() - 1200]);
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->never())->method('request');
+        $token = self::createTokenForCookieJwt($previousJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createRefreshedStoredRefreshToken($previousJwt, self::createJwt(), time() - 601)), httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::AUTHENTICATION_NEEDED);
+    }
+
+    #[Test]
+    public function authenticateRejectsIdentityTokenOfRecentRefreshForAnotherSubject(): void
+    {
+        $previousJwt = self::createJwt(['exp' => time() - 600]);
+        $token = self::createTokenForCookieJwt($previousJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createRefreshedStoredRefreshToken($previousJwt, self::createJwt(['sub' => 'mallory']), time() - 60)))->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
+    }
+
+    #[Test]
+    public function authenticateDoesNotRefreshExpiredBearerToken(): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->never())->method('request');
+        $token = self::createTokenForBearerJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::AUTHENTICATION_NEEDED);
+    }
+
+    #[Test]
+    public function authenticateDoesNotStartSessionToRefreshExpiredToken(): void
+    {
+        $session = $this->createMock(SessionInterface::class);
+        $session->method('canBeResumed')->willReturn(false);
+        $session->method('isStarted')->willReturn(false);
+        $session->expects($this->never())->method('start');
+        $token = self::createTokenForCookieJwt(self::createJwt(['exp' => time() - 600]));
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $session)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::AUTHENTICATION_NEEDED);
+    }
+
+    #[Test]
+    public function authenticateRejectsRefreshedTokenOfAnotherSubject(): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => self::createJwt(['sub' => 'mallory'])])));
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
+    }
+
+    #[Test]
+    public function authenticateRejectsRefreshedTokenOfAnotherTenant(): void
+    {
+        $expiredJwt = self::createJwt(['iss' => 'https://login.example.com/tenant-1/v2.0', 'tid' => 'tenant-1', 'exp' => time() - 600]);
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => self::createJwt(['iss' => 'https://login.example.com/tenant-2/v2.0', 'tid' => 'tenant-2'])])));
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient, serviceOptions: ['issuer' => 'https://login.example.com/{tenantid}/v2.0'])->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
+    }
+
+    public static function rejectedRefreshedTokens(): array
+    {
+        return [
+            'identity token of another subject' => [['sub' => 'mallory'], false],
+            'identity token with invalid signature' => [['exp' => time() + 7200], true],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('rejectedRefreshedTokens')]
+    public function authenticateDoesNotStoreRotatedRefreshTokenOfRejectedIdentityToken(array $claims, bool $withInvalidSignature): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $refreshedJwt = $withInvalidSignature ? self::createJwtWithInvalidSignature($claims) : self::createJwt($claims);
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => $refreshedJwt, 'refresh_token' => 'the-rotated-refresh-token'])));
+        $session = $this->createMock(SessionInterface::class);
+        $session->method('isStarted')->willReturn(true);
+        $session->method('getData')->willReturnMap([['flownative_oidc_refresh:SomeProvider', self::createStoredRefreshToken('the-refresh-token', $expiredJwt)]]);
+        $session->expects($this->never())->method('putData');
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $session, httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
+    }
+
+    #[Test]
+    public function authenticateDoesNotAcceptRefreshResponseWithoutIdentityTokenString(): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => ['not' => 'a string']])));
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::AUTHENTICATION_NEEDED);
+    }
+
+    #[Test]
     public function authenticateRejectsRefreshedTokenWithInvalidSignature(): void
     {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
         $httpClient = $this->createStub(HttpClient::class);
-        $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => self::createJwtWithInvalidSignature(['sub' => 'mallory'])])));
-        $token = self::createTokenForBearerJwt(self::createJwt(['exp' => time() - 600]));
+        $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => self::createJwtWithInvalidSignature(['exp' => time() + 7200])])));
+        $token = self::createTokenForCookieJwt($expiredJwt);
 
-        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession('the-refresh-token'), httpClient: $httpClient)->authenticate($token);
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
 
         self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
     }
@@ -433,11 +637,12 @@ class OpenIdConnectProviderTest extends TestCase
     #[Test]
     public function authenticateRejectsRefreshedTokenForOtherAudience(): void
     {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
         $httpClient = $this->createStub(HttpClient::class);
         $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => self::createJwt(['aud' => 'https://other.example.com'])])));
-        $token = self::createTokenForBearerJwt(self::createJwt(['exp' => time() - 600]));
+        $token = self::createTokenForCookieJwt($expiredJwt);
 
-        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession('the-refresh-token'), httpClient: $httpClient)->authenticate($token);
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
 
         self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
     }
@@ -445,11 +650,12 @@ class OpenIdConnectProviderTest extends TestCase
     #[Test]
     public function authenticateDoesNotRefreshExpiredTokenIssuedForOtherAudience(): void
     {
+        $expiredJwt = self::createJwt(['aud' => 'https://other.example.com', 'exp' => time() - 600]);
         $httpClient = $this->createMock(HttpClient::class);
         $httpClient->expects($this->never())->method('request');
-        $token = self::createTokenForBearerJwt(self::createJwt(['aud' => 'https://other.example.com', 'exp' => time() - 600]));
+        $token = self::createTokenForCookieJwt($expiredJwt);
 
-        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession('the-refresh-token'), httpClient: $httpClient)->authenticate($token);
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
 
         self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
     }
@@ -457,10 +663,10 @@ class OpenIdConnectProviderTest extends TestCase
     #[Test]
     public function authenticateDoesNotStoreRefreshTokenOfRejectedToken(): void
     {
-        $token = self::createTokenForBearerJwt(self::createJwt(['aud' => 'https://other.example.com']));
-        OpenIdConnectClientFixture::inject($token, 'refreshToken', 'the-new-refresh-token');
+        $token = self::createTokenForFinishedAuthorization(self::createJwt(['aud' => 'https://other.example.com']), 'the-new-refresh-token');
         $session = $this->createMock(SessionInterface::class);
         $session->method('isStarted')->willReturn(true);
+        $session->expects($this->never())->method('renewId');
         $session->expects($this->never())->method('putData');
 
         $this->createProvider(['roles' => ['Some.Package:User']], session: $session)->authenticate($token);
@@ -469,13 +675,81 @@ class OpenIdConnectProviderTest extends TestCase
     }
 
     #[Test]
-    public function authenticateStoresRefreshTokenOfNewAuthorizationInSession(): void
+    public function authenticateRenewsExistingSessionAndStoresRefreshTokenAfterLogin(): void
     {
-        $token = self::createTokenForBearerJwt(self::createJwt());
-        OpenIdConnectClientFixture::inject($token, 'refreshToken', 'the-new-refresh-token');
+        $jwt = self::createJwt();
+        $token = self::createTokenForFinishedAuthorization($jwt, 'the-new-refresh-token');
+        $session = $this->createMock(SessionInterface::class);
+        $session->method('canBeResumed')->willReturn(true);
+        $session->method('isStarted')->willReturn(true);
+        $session->expects($this->once())->method('renewId');
+        $session->expects($this->once())->method('putData')->with('flownative_oidc_refresh:SomeProvider', self::createStoredRefreshToken('the-new-refresh-token', $jwt));
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $session)->authenticate($token);
+
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+    }
+
+    #[Test]
+    public function authenticateStartsSessionForRefreshTokenOfLoginIfNoSessionExists(): void
+    {
+        $jwt = self::createJwt();
+        $token = self::createTokenForFinishedAuthorization($jwt, 'the-new-refresh-token');
+        $started = false;
+        $session = $this->createMock(SessionInterface::class);
+        $session->method('canBeResumed')->willReturn(false);
+        $session->method('isStarted')->willReturnCallback(static function () use (&$started): bool {
+            return $started;
+        });
+        $session->expects($this->once())->method('start')->willReturnCallback(static function () use (&$started): void {
+            $started = true;
+        });
+        $session->expects($this->never())->method('renewId');
+        $session->expects($this->once())->method('putData')->with('flownative_oidc_refresh:SomeProvider', self::createStoredRefreshToken('the-new-refresh-token', $jwt));
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $session)->authenticate($token);
+
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+    }
+
+    #[Test]
+    public function authenticateDoesNotStartSessionForLoginWithoutRefreshToken(): void
+    {
+        $token = self::createTokenForFinishedAuthorization(self::createJwt(), '');
+        $session = $this->createMock(SessionInterface::class);
+        $session->method('canBeResumed')->willReturn(false);
+        $session->method('isStarted')->willReturn(false);
+        $session->expects($this->never())->method('start');
+        $session->expects($this->never())->method('putData');
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $session)->authenticate($token);
+
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+    }
+
+    #[Test]
+    public function authenticateRemovesRefreshTokenOfEarlierLoginIfLoginHasNone(): void
+    {
+        $token = self::createTokenForFinishedAuthorization(self::createJwt(), '');
+        $session = $this->createMock(SessionInterface::class);
+        $session->method('canBeResumed')->willReturn(true);
+        $session->method('isStarted')->willReturn(true);
+        $session->expects($this->once())->method('renewId');
+        $session->expects($this->once())->method('putData')->with('flownative_oidc_refresh:SomeProvider', null);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $session)->authenticate($token);
+
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+    }
+
+    #[Test]
+    public function authenticateDoesNotRenewSessionForTokenFromCookie(): void
+    {
+        $token = self::createTokenForCookieJwt(self::createJwt());
         $session = $this->createMock(SessionInterface::class);
         $session->method('isStarted')->willReturn(true);
-        $session->expects($this->once())->method('putData')->with('flownative_oidc_refresh', 'the-new-refresh-token');
+        $session->expects($this->never())->method('renewId');
+        $session->expects($this->never())->method('putData');
 
         $this->createProvider(['roles' => ['Some.Package:User']], session: $session)->authenticate($token);
 
@@ -534,7 +808,7 @@ class OpenIdConnectProviderTest extends TestCase
         $provider = OpenIdConnectProvider::create('SomeProvider', array_merge(['serviceName' => OpenIdConnectClientFixture::SERVICE_NAME], $options));
         OpenIdConnectClientFixture::inject($provider, 'logger', $logger);
         OpenIdConnectClientFixture::inject($provider, 'openIdConnectClientFactory', $clientFactory);
-        OpenIdConnectClientFixture::inject($provider, 'session', $session ?? $this->createSession(''));
+        OpenIdConnectClientFixture::inject($provider, 'session', $session ?? $this->createSession(null));
         OpenIdConnectClientFixture::inject($provider, 'policyService', $policyService ?? $this->createPolicyService(['Some.Package:User']));
         OpenIdConnectClientFixture::inject($provider, 'accountRepository', $accountRepository ?? $this->createStub(AccountRepository::class));
         return $provider;
@@ -549,11 +823,11 @@ class OpenIdConnectProviderTest extends TestCase
         return $policyService;
     }
 
-    private function createSession(string $storedRefreshToken): SessionInterface
+    private function createSession(array|string|null $storedRefreshToken): SessionInterface
     {
         $session = $this->createStub(SessionInterface::class);
         $session->method('isStarted')->willReturn(true);
-        $session->method('getData')->willReturnMap([['flownative_oidc_refresh', $storedRefreshToken]]);
+        $session->method('getData')->willReturnMap([['flownative_oidc_refresh:SomeProvider', $storedRefreshToken]]);
         return $session;
     }
 
@@ -576,6 +850,39 @@ class OpenIdConnectProviderTest extends TestCase
         [$header, , $signature] = explode('.', self::createJwt());
         [, $forgedClaims] = explode('.', self::createJwt($claims));
         return $header . '.' . $forgedClaims . '.' . $signature;
+    }
+
+    private static function createStoredRefreshToken(string $refreshToken, string $identityTokenJwt): array
+    {
+        return StoredRefreshToken::forLogin($refreshToken, IdentityToken::fromJwt($identityTokenJwt))->toSessionData();
+    }
+
+    /**
+     * The session data as it looks after a request refreshed the previous identity token at the given time
+     */
+    private static function createRefreshedStoredRefreshToken(string $previousIdentityTokenJwt, string $refreshedIdentityTokenJwt, int $refreshedAt): array
+    {
+        return StoredRefreshToken::forLogin('the-refresh-token', IdentityToken::fromJwt($previousIdentityTokenJwt))
+            ->withRefreshedIdentityToken(IdentityToken::fromJwt($refreshedIdentityTokenJwt), '', $refreshedAt)
+            ->toSessionData();
+    }
+
+    private static function createTokenForCookieJwt(string $jwt): OpenIdConnectToken
+    {
+        $token = new OpenIdConnectToken();
+        $token->updateCredentials(ActionRequest::fromHttpRequest((new ServerRequest('GET', 'https://www.example.com/'))->withCookieParams(['__Host-flownative_oidc_jwt' => $jwt])));
+        return $token;
+    }
+
+    /**
+     * The token behaves as if the browser had just returned from the identity provider
+     */
+    private static function createTokenForFinishedAuthorization(string $jwt, string $refreshToken): OpenIdConnectToken
+    {
+        $token = self::createTokenForCookieJwt($jwt);
+        OpenIdConnectClientFixture::inject($token, 'refreshToken', $refreshToken);
+        OpenIdConnectClientFixture::inject($token, 'nonceCookieName', '__Host-flownative_oidc_nonce_0123456789abcdef');
+        return $token;
     }
 
     private static function createTokenForBearerJwt(string $jwt): OpenIdConnectToken

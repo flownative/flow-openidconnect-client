@@ -151,6 +151,14 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     }
 
     /**
+     * Tells if the identity token comes from an authorization which this browser has just finished at the identity provider
+     */
+    public function hasFinishedAuthorization(): bool
+    {
+        return $this->nonceCookieName !== '';
+    }
+
+    /**
      * @throws AccessDeniedException | AuthenticationRequiredException | InvalidAuthenticationStatusException
      */
     private function extractIdentityTokenFromAuthorizationHeader(string $authorizationHeader): IdentityToken

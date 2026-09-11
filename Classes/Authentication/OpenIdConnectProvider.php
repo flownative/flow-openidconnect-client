@@ -11,6 +11,8 @@ use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
+use Flownative\OpenIdConnect\Client\TokenSet;
+use InvalidArgumentException;
 use Neos\Cache\Exception as CacheException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Configuration\Exception\InvalidConfigurationTypeException;
@@ -43,6 +45,8 @@ final class OpenIdConnectProvider extends AbstractProvider
      * Seconds which compensate for clock differences between the identity provider and this application
      */
     private const int DEFAULT_LEEWAY = 60;
+
+    private const string REFRESH_TOKEN_SESSION_KEY_PREFIX = 'flownative_oidc_refresh:';
 
     #[Flow\Inject]
     protected PolicyService $policyService;
@@ -123,29 +127,23 @@ final class OpenIdConnectProvider extends AbstractProvider
             return;
         }
 
-        $refreshToken = $authenticationToken->getRefreshToken();
-        if ($refreshToken !== '') {
-            if ($this->session->canBeResumed()) {
-                $this->session->resume();
-            }
-            if (!$this->session->isStarted()) {
-                $this->session->start();
-            }
-
-            if ($this->session->isStarted()) {
-                $this->logger?->debug('OpenID Connect: Set refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
-                $this->session->putData('flownative_oidc_refresh', $refreshToken);
-            } else {
-                $this->logger?->debug('OpenID Connect: Could not store refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
-            }
+        if ($authenticationToken->hasFinishedAuthorization()) {
+            $this->renewSessionAfterLogin($identityToken, $authenticationToken->getRefreshToken());
         }
 
-        if ($identityToken->isExpiredAt($now->sub($leewayInterval))) {
-            $refreshedIdentityToken = $this->refreshExpiredIdentityToken($identityToken, $client);
-            if ($refreshedIdentityToken !== $identityToken) {
-                if (!$this->verifySignature($refreshedIdentityToken, $jwks) || !$this->hasAcceptableClaims($refreshedIdentityToken, $client->getOptions(), $validationTime)) {
+        // Clients which send a bearer token must refresh it themselves, because they never receive a token refreshed here
+        if ($identityToken->isExpiredAt($now->sub($leewayInterval)) && !$authenticationToken->hasBearerAuthorizationHeader()) {
+            $storedRefreshToken = $this->findStoredRefreshToken($identityToken);
+            $refreshedTokenSet = $storedRefreshToken !== null ? $this->refreshExpiredIdentityToken($identityToken, $storedRefreshToken, $client, $now) : null;
+            if ($storedRefreshToken !== null && $refreshedTokenSet !== null) {
+                $refreshedIdentityToken = $refreshedTokenSet->identityToken;
+                if (!$this->verifySignature($refreshedIdentityToken, $jwks) || !$this->hasAcceptableClaims($refreshedIdentityToken, $client->getOptions(), $validationTime) || !$this->isRefreshOf($refreshedIdentityToken, $identityToken)) {
                     $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
                     return;
+                }
+                // The session already holds a refreshed identity token which a parallel request received a short while ago
+                if (!$storedRefreshToken->isBoundTo($refreshedIdentityToken)) {
+                    $this->storeRefreshToken($storedRefreshToken->withRefreshedIdentityToken($refreshedIdentityToken, $refreshedTokenSet->refreshToken, $now->getTimestamp()));
                 }
                 $identityToken = $refreshedIdentityToken;
             }
@@ -196,44 +194,110 @@ final class OpenIdConnectProvider extends AbstractProvider
     }
 
     /**
-     * Tries to replace an expired identity token with a new one, using the refresh token stored in the session
+     * Gives the session a new identifier after a login, and stores the refresh token of the login in it
      *
-     * Returns the given token if it cannot be refreshed.
+     * A session which existed before the login may be known to somebody else, for example through a session cookie planted in the
+     * browser. With the old identifier, that person could use the refresh token of this login.
      */
-    private function refreshExpiredIdentityToken(IdentityToken $identityToken, OpenIdConnectClient $client): IdentityToken
+    private function renewSessionAfterLogin(IdentityToken $identityToken, string $refreshToken): void
     {
         if ($this->session->canBeResumed()) {
             $this->session->resume();
         }
-        if (!$this->session->isStarted()) {
+        if ($this->session->isStarted()) {
+            $this->session->renewId();
+        } elseif ($refreshToken !== '') {
             $this->session->start();
         }
-        if (!$this->session->isStarted()) {
-            return $identityToken;
-        }
 
+        if ($refreshToken !== '') {
+            $this->storeRefreshToken(StoredRefreshToken::forLogin($refreshToken, $identityToken));
+        } elseif ($this->session->isStarted()) {
+            // The refresh token of an earlier login in this browser must not outlive the new login
+            $this->session->putData($this->getRefreshTokenSessionKey(), null);
+        }
+    }
+
+    /**
+     * Each authentication provider keeps its own refresh token, so that a login with one provider doesn't replace the token of another
+     */
+    private function getRefreshTokenSessionKey(): string
+    {
+        return self::REFRESH_TOKEN_SESSION_KEY_PREFIX . $this->name;
+    }
+
+    private function storeRefreshToken(StoredRefreshToken $storedRefreshToken): void
+    {
+        if (!$this->session->isStarted()) {
+            $this->logger?->debug('OpenID Connect: Could not store refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
+            return;
+        }
+        $this->session->putData($this->getRefreshTokenSessionKey(), $storedRefreshToken->toSessionData());
+        $this->logger?->debug('OpenID Connect: Stored refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
+    }
+
+    private function findStoredRefreshToken(IdentityToken $identityToken): ?StoredRefreshToken
+    {
+        // Only an existing session can hold a refresh token, so no session is started here
+        if ($this->session->canBeResumed()) {
+            $this->session->resume();
+        }
+        $storedRefreshToken = $this->session->isStarted() ? StoredRefreshToken::fromSessionData($this->session->getData($this->getRefreshTokenSessionKey())) : null;
+        if ($storedRefreshToken === null) {
+            $this->logger?->info(sprintf('OpenID Connect: The identity token %s is expired, no refresh token in session', self::describeValue($identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? null)), LogEnvironment::fromMethodName(__METHOD__));
+        }
+        return $storedRefreshToken;
+    }
+
+    /**
+     * Returns a new identity token for the expired one, or null if it cannot be refreshed
+     *
+     * Only the identity token which was issued last is refreshed at the identity provider. A request which still carries the identity
+     * token before it receives the refreshed identity token from the session, if the refresh happened a short while ago.
+     */
+    private function refreshExpiredIdentityToken(IdentityToken $identityToken, StoredRefreshToken $storedRefreshToken, OpenIdConnectClient $client, DateTimeImmutable $now): ?TokenSet
+    {
         $accountIdentifier = self::describeValue($identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? null);
-        $refreshToken = (string)$this->session->getData('flownative_oidc_refresh');
-        if ($refreshToken === '') {
-            $this->logger?->info(sprintf('OpenID Connect: The identity token %s is expired, no refresh token in session', $accountIdentifier), LogEnvironment::fromMethodName(__METHOD__));
-            return $identityToken;
+
+        if ($storedRefreshToken->hasRecentlyReplaced($identityToken, $now->getTimestamp())) {
+            $this->logger?->debug(sprintf('OpenID Connect: The identity token %s was refreshed a short while ago, using the refreshed identity token from the session', $accountIdentifier), LogEnvironment::fromMethodName(__METHOD__));
+            try {
+                return new TokenSet(IdentityToken::fromJwt($storedRefreshToken->identityToken), '');
+            } catch (InvalidArgumentException) {
+                return null;
+            }
+        }
+        if (!$storedRefreshToken->isBoundTo($identityToken)) {
+            $this->logger?->notice(sprintf('OpenID Connect: The identity token %s is expired, but the refresh token in the session belongs to another identity token', $accountIdentifier), LogEnvironment::fromMethodName(__METHOD__));
+            return null;
         }
 
         $this->logger?->info(sprintf('OpenID Connect: The identity token %s is expired, trying to refresh it with the refresh token from the session', $accountIdentifier), LogEnvironment::fromMethodName(__METHOD__));
         try {
-            $tokenSet = $client->refreshIdentityToken($identityToken, $refreshToken);
+            return $client->refreshIdentityToken($storedRefreshToken->refreshToken);
         } catch (ConnectionException|ServiceException $exception) {
             $this->logger?->info(sprintf('OpenID Connect: Could not refresh the identity token: %s', $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
-            return $identityToken;
+            return null;
         }
+    }
 
-        if ($tokenSet->refreshToken !== '') {
-            $this->logger?->debug('OpenID Connect: Set new refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
-            $this->session->putData('flownative_oidc_refresh', $tokenSet->refreshToken);
-        } else {
-            $this->logger?->info('OpenID Connect: Did not receive new refresh token to set in session', LogEnvironment::fromMethodName(__METHOD__));
+    /**
+     * A refreshed identity token must have the same issuer and subject as the expired one
+     *
+     * @see https://openid.net/specs/openid-connect-core-1_0.html#RefreshTokenResponse
+     */
+    private function isRefreshOf(IdentityToken $refreshedIdentityToken, IdentityToken $expiredIdentityToken): bool
+    {
+        if (self::hasIssuerAndSubject($refreshedIdentityToken, $expiredIdentityToken->values['iss'] ?? null, $expiredIdentityToken->values['sub'] ?? null)) {
+            return true;
         }
-        return $tokenSet->identityToken;
+        $this->logger?->notice(sprintf('OpenID Connect: Rejected the refreshed identity token for service "%s", because its issuer or subject differs from the expired identity token', $this->options['serviceName']), LogEnvironment::fromMethodName(__METHOD__));
+        return false;
+    }
+
+    private static function hasIssuerAndSubject(IdentityToken $identityToken, mixed $issuer, mixed $subject): bool
+    {
+        return is_string($issuer) && is_string($subject) && ($identityToken->values['iss'] ?? null) === $issuer && ($identityToken->values['sub'] ?? null) === $subject;
     }
 
     /**

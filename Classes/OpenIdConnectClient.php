@@ -288,7 +288,7 @@ final class OpenIdConnectClient
      * @throws ServiceException
      * @throws ConnectionException
      */
-    public function refreshIdentityToken(IdentityToken $identityToken, string $refreshToken): TokenSet
+    public function refreshIdentityToken(string $refreshToken): TokenSet
     {
         $tokenEndpoint = $this->options['tokenEndpoint'];
         try {
@@ -298,8 +298,6 @@ final class OpenIdConnectClient
                     'client_id' => $this->settings['services'][$this->serviceName]['options']['clientId'],
                     'client_secret' => $this->settings['services'][$this->serviceName]['options']['clientSecret'],
                     'refresh_token' => $refreshToken,
-                    'prompt' => 'none',
-                    'id_token_hint' => $identityToken->asJwt()
                 ]
             ]);
         } catch (GuzzleException $e) {
@@ -311,12 +309,14 @@ final class OpenIdConnectClient
         } catch (JsonException $e) {
             throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while refreshing identity token from %s', $tokenEndpoint), 1741193238, $e);
         }
-        if (!is_array($response) || !isset($response['id_token'])) {
+        if (!is_array($response) || !is_string($response['id_token'] ?? null)) {
             throw new ServiceException(sprintf('OpenID Connect Client: Invalid response data while refreshing identity token from %s', $tokenEndpoint), 1741193241);
         }
 
         try {
-            $result = new TokenSet(IdentityToken::fromJwt($response['id_token']), '');
+            // Identity providers which rotate refresh tokens return a new one, and the previous one becomes invalid
+            $refreshToken = $response['refresh_token'] ?? '';
+            $result = new TokenSet(IdentityToken::fromJwt($response['id_token']), is_string($refreshToken) ? $refreshToken : '');
         } catch (InvalidArgumentException $e) {
             throw new ServiceException(sprintf('OpenID Connect Client: Could not construct identity token from response data while refreshing identity token from %s', $tokenEndpoint), 1741271679, $e);
         }

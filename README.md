@@ -363,6 +363,23 @@ like Auth0 or Microsoft Entra ID issue a refresh token. The refresh
 token is stored in the user's session and is used to refresh an
 expired identity token without an interactive login.
 
+After a login, the session gets a new identifier, so that a session
+which was known before can't reach the refresh token. The refresh token
+is bound to the identity token which was issued last, and only this
+identity token is refreshed. A refreshed identity token must have the
+same issuer and subject as the expired one. Requests which a browser
+sent with the previous identity token while another request refreshed
+it receive the refreshed identity token from the session, for up to ten
+minutes after the refresh. If the identity provider rotates refresh tokens, the
+new refresh token replaces the old one in the session. Refresh tokens
+which earlier versions of this package stored are not used anymore, so
+users log in once more when their identity token expires after an
+update.
+
+Identity tokens which a client sends in the "Authorization" header are
+not refreshed, because the client would never receive the new token.
+Such clients must refresh their tokens themselves.
+
 Some identity providers treat this scope differently. Google rejects
 it with an "invalid_scope" error. Keycloak issues an offline token
 which does not expire with the SSO session. If you don't need refresh
