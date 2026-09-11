@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Http;
 
+use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OAuthClient;
@@ -58,6 +59,9 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
             // removing it would end a login based on the cookie because of a failed bearer token.
             if ($token->hasBearerAuthorizationHeader()) {
                 continue;
+            }
+            if ($token->getNonceCookieName() !== '') {
+                $response = $response->withAddedHeader('Set-Cookie', (string)Nonce::createRemovalCookie($token->getNonceCookieName(), $cookieSecure));
             }
             $providerName = $token->getAuthenticationProviderName();
             $providerOptions = $this->authenticationProviderConfiguration[$token->getAuthenticationProviderName()]['providerOptions'] ?? [];

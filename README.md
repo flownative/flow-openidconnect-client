@@ -295,6 +295,36 @@ Without further programming you need to manually create a Neos user
 which has the same username as the one provided in the "sub" claim by
 the OIDC identity provider.
 
+### Binding the Login to the Browser
+
+Before the entry point redirects the browser to the identity provider,
+it stores a random secret in a cookie named
+"flownative_oidc_nonce_…". The identity provider receives a hash of
+this secret as "nonce" and copies it into the identity token. When the
+browser returns, the token is only accepted if the browser has the
+matching cookie. A login which was started in another browser is
+therefore rejected. The cookie expires after one hour and is removed
+after a successful login.
+
+The identity provider must return the nonce in the identity token, as
+OpenID Connect requires. If it doesn't, every login fails and the
+security log contains "contains no nonce". Logins which are in progress
+while you update this package fail once and then start again.
+
+If you start an authorization yourself, pass a new nonce to
+`OpenIdConnectClient::startAuthorization()` and set its cookie on the
+response which redirects the browser. This response must not be
+cached, because the cookie contains the secret:
+
+```php
+$nonce = Nonce::generate();
+$uri = $client->startAuthorization($returnToUri, 'profile email', $nonce);
+// Pass false only for testing without HTTPS
+$this->response->setCookie($nonce->createCookie(true));
+$this->response->setHttpHeader('Cache-Control', 'no-store');
+$this->redirectToUri($uri);
+```
+
 ### JWT Cookie
 
 After a successful login, the middleware stores the identity token in a

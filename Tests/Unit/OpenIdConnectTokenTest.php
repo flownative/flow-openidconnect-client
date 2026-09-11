@@ -14,6 +14,7 @@ namespace Flownative\OpenIdConnect\Client;
  */
 
 use Flownative\OAuth2\Client\Authorization;
+use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\OpenIdConnectClientFixture;
@@ -24,6 +25,7 @@ use Neos\Flow\Security\Authentication\TokenInterface;
 use Neos\Flow\Security\Cryptography\HashService;
 use Neos\Flow\Security\Exception\AccessDeniedException;
 use Neos\Flow\Security\Exception\AuthenticationRequiredException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -59,11 +61,13 @@ class OpenIdConnectTokenTest extends TestCase
         $token = new OpenIdConnectToken();
         $token->updateCredentials(self::createActionRequest(headers: ['Authorization' => 'Bearer ' . self::createUnsignedJwt(['sub' => 'header-subject'])]));
         OpenIdConnectClientFixture::inject($token, 'refreshToken', 'refresh-token-of-previous-request');
+        OpenIdConnectClientFixture::inject($token, 'nonceCookieName', 'flownative_oidc_nonce_0123456789abcdef');
 
         $token->updateCredentials(self::createActionRequest(cookies: [self::COOKIE_NAME => self::createUnsignedJwt(['sub' => 'cookie-subject'])]));
 
         static::assertFalse($token->hasBearerAuthorizationHeader());
         static::assertSame('', $token->getRefreshToken());
+        static::assertSame('', $token->getNonceCookieName());
         static::assertSame('cookie-subject', $token->extractIdentityTokenFromRequest(self::COOKIE_NAME)->values['sub']);
     }
 
@@ -189,19 +193,80 @@ class OpenIdConnectTokenTest extends TestCase
     public function extractIdentityTokenFromRequestUsesTokensOfFinishedAuthorization(): void
     {
         $hashService = OpenIdConnectClientFixture::createHashService();
-        $jwt = self::createUnsignedJwt(['sub' => 'returning-subject']);
-        $authorization = new Authorization(self::AUTHORIZATION_ID, 'oidc', OpenIdConnectClientFixture::CLIENT_ID, Authorization::GRANT_AUTHORIZATION_CODE, 'openid');
-        $authorization->setSerializedAccessToken(json_encode(new AccessToken(['access_token' => 'the-access-token', 'refresh_token' => 'the-refresh-token', 'id_token' => $jwt]), JSON_THROW_ON_ERROR));
+        $nonce = Nonce::generate();
+        $nonceCookies = self::createNonceCookies($nonce);
+        $jwt = self::createUnsignedJwt(['sub' => 'returning-subject', 'nonce' => $nonce->value]);
 
-        $oAuthClient = $this->createMock(OAuthClient::class);
-        $oAuthClient->method('getAuthorization')->willReturnMap([[self::AUTHORIZATION_ID, $authorization]]);
-        $oAuthClient->expects($this->once())->method('removeAuthorization')->with(self::AUTHORIZATION_ID);
-
-        $token = $this->createTokenWithClient($oAuthClient, $hashService);
-        $token->updateCredentials(self::createActionRequest(queryParameters: self::createReturnQueryParameters($hashService)));
+        $token = $this->createTokenWithClient($this->createOAuthClientForFinishedAuthorization($jwt), $hashService);
+        $token->updateCredentials(self::createActionRequest(cookies: $nonceCookies, queryParameters: self::createReturnQueryParameters($hashService, $nonce->value)));
 
         static::assertSame($jwt, $token->extractIdentityTokenFromRequest(self::COOKIE_NAME)->asJwt());
         static::assertSame('the-refresh-token', $token->getRefreshToken());
+        static::assertSame(array_key_first($nonceCookies), $token->getNonceCookieName());
+    }
+
+    public static function identityTokensWithoutNonce(): array
+    {
+        return [
+            'no nonce claim' => [[]],
+            'nonce claim is not a string' => [['nonce' => ['value']]],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('identityTokensWithoutNonce')]
+    public function extractIdentityTokenFromRequestDeniesAccessIfIdentityTokenContainsNoNonce(array $nonceClaim): void
+    {
+        $hashService = OpenIdConnectClientFixture::createHashService();
+        $nonce = Nonce::generate();
+        $jwt = self::createUnsignedJwt(['sub' => 'returning-subject'] + $nonceClaim);
+
+        $token = $this->createTokenWithClient($this->createOAuthClientForFinishedAuthorization($jwt), $hashService);
+        $token->updateCredentials(self::createActionRequest(cookies: self::createNonceCookies($nonce), queryParameters: self::createReturnQueryParameters($hashService, $nonce->value)));
+
+        try {
+            $token->extractIdentityTokenFromRequest(self::COOKIE_NAME);
+            static::fail('Expected an AccessDeniedException');
+        } catch (AccessDeniedException $exception) {
+            static::assertSame(1789131857, $exception->getCode());
+        }
+        static::assertSame(TokenInterface::WRONG_CREDENTIALS, $token->getAuthenticationStatus());
+    }
+
+    public static function returnsNotBoundToThisAuthorizationAndBrowser(): array
+    {
+        $nonce = Nonce::generate();
+        $otherNonce = Nonce::generate();
+        $nonceCookies = self::createNonceCookies($nonce);
+        return [
+            'nonce cookie is missing' => [$nonce->value, $nonce->value, []],
+            'nonce cookie of another login' => [$nonce->value, $nonce->value, self::createNonceCookies($otherNonce)],
+            'nonce cookie with another secret' => [$nonce->value, $nonce->value, [array_key_first($nonceCookies) => str_repeat('0', 64)]],
+            'only a valid JWT cookie' => [$nonce->value, $nonce->value, [self::COOKIE_NAME => self::createUnsignedJwt(['sub' => 'cookie-subject'])]],
+            'nonce of another authorization' => [$otherNonce->value, $nonce->value, $nonceCookies],
+            'authorization without nonce' => [null, $nonce->value, $nonceCookies],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('returnsNotBoundToThisAuthorizationAndBrowser')]
+    public function extractIdentityTokenFromRequestDeniesAccessIfNonceDoesNotBelongToThisAuthorizationAndBrowser(?string $authorizationNonce, string $nonceClaim, array $cookies): void
+    {
+        $hashService = OpenIdConnectClientFixture::createHashService();
+        $jwt = self::createUnsignedJwt(['sub' => 'returning-subject', 'nonce' => $nonceClaim]);
+
+        $token = $this->createTokenWithClient($this->createOAuthClientForFinishedAuthorization($jwt), $hashService);
+        $token->updateCredentials(self::createActionRequest(cookies: $cookies, queryParameters: self::createReturnQueryParameters($hashService, $authorizationNonce)));
+
+        try {
+            $token->extractIdentityTokenFromRequest(self::COOKIE_NAME);
+            static::fail('Expected an AccessDeniedException');
+        } catch (AccessDeniedException $exception) {
+            static::assertSame(1789131856, $exception->getCode());
+        }
+        static::assertSame(TokenInterface::WRONG_CREDENTIALS, $token->getAuthenticationStatus());
+        static::assertSame('', $token->getRefreshToken());
+        static::assertSame('', $token->getNonceCookieName());
     }
 
     #[Test]
@@ -285,10 +350,34 @@ class OpenIdConnectTokenTest extends TestCase
         return $token;
     }
 
-    private static function createReturnQueryParameters(HashService $hashService): array
+    /**
+     * The authorization contains the given identity token and is expected to be removed, even if the token is rejected
+     */
+    private function createOAuthClientForFinishedAuthorization(string $identityTokenJwt): OAuthClient
     {
+        $authorization = new Authorization(self::AUTHORIZATION_ID, 'oidc', OpenIdConnectClientFixture::CLIENT_ID, Authorization::GRANT_AUTHORIZATION_CODE, 'openid');
+        $authorization->setSerializedAccessToken(json_encode(new AccessToken(['access_token' => 'the-access-token', 'refresh_token' => 'the-refresh-token', 'id_token' => $identityTokenJwt]), JSON_THROW_ON_ERROR));
+
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->method('getAuthorization')->willReturnMap([[self::AUTHORIZATION_ID, $authorization]]);
+        $oAuthClient->expects($this->once())->method('removeAuthorization')->with(self::AUTHORIZATION_ID);
+        return $oAuthClient;
+    }
+
+    private static function createNonceCookies(Nonce $nonce): array
+    {
+        $cookie = $nonce->createCookie(true);
+        return [$cookie->getName() => $cookie->getValue()];
+    }
+
+    private static function createReturnQueryParameters(HashService $hashService, ?string $nonce = null): array
+    {
+        $tokenArguments = [TokenArguments::SERVICE_NAME => OpenIdConnectClientFixture::SERVICE_NAME];
+        if ($nonce !== null) {
+            $tokenArguments[TokenArguments::NONCE] = $nonce;
+        }
         return [
-            OpenIdConnectToken::OIDC_PARAMETER_NAME => (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => OpenIdConnectClientFixture::SERVICE_NAME], $hashService),
+            OpenIdConnectToken::OIDC_PARAMETER_NAME => (string)TokenArguments::fromArray($tokenArguments, $hashService),
             OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE) => self::AUTHORIZATION_ID,
         ];
     }

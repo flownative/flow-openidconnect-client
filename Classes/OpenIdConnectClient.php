@@ -7,10 +7,12 @@ use Doctrine\ORM\Exception\ORMException;
 use Doctrine\ORM\OptimisticLockException;
 use Flownative\OAuth2\Client\Authorization;
 use Flownative\OAuth2\Client\OAuthClientException;
+use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Psr7\Query;
 use InvalidArgumentException;
 use JsonException;
 use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
@@ -185,24 +187,30 @@ final class OpenIdConnectClient
     /**
      * Start authorization via OAuth, with the Authorization Code Flow, using an OpenID Connect scope
      *
-     * This method is an interactive authorization, which usually requires a browser to work.
+     * This method is an interactive authorization, which usually requires a browser to work. The response which redirects the browser
+     * must also set the cookie of the given nonce, otherwise the login is rejected when the browser returns.
      *
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
      * @param bool $requestRefreshToken If "offline_access" should be requested, so that an expired identity token can be refreshed
      * @throws OAuthClientException
      */
-    public function startAuthorization(UriInterface $returnToUri, string $scope, bool $requestRefreshToken = true): UriInterface
+    public function startAuthorization(UriInterface $returnToUri, string $scope, Nonce $nonce, bool $requestRefreshToken = true): UriInterface
     {
-        $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $this->serviceName], $this->hashService);
+        $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $this->serviceName, TokenArguments::NONCE => $nonce->value], $this->hashService);
         if (str_starts_with($returnArguments, 'ERROR')) {
             throw new RuntimeException(substr($returnArguments, 6));
         }
-        $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
+
+        // After a rejected return, the URI still contains the parameters of that login, which must not be passed on again
+        $queryParameters = Query::parse($returnToUri->getQuery());
+        unset($queryParameters[OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE)]);
+        $queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME] = $returnArguments;
+        $returnToUri = $returnToUri->withQuery(Query::build($queryParameters));
 
         if (empty($this->options['clientId']) || empty($this->options['clientSecret'])) {
             throw new RuntimeException(sprintf('OpenID Connect Client: Authorization Code Flow requires "clientId" and "clientSecret" to be configured for service "%s".', $this->serviceName), 1596456168);
         }
-        return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $this->buildAuthorizationScope($scope, $requestRefreshToken));
+        return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $this->buildAuthorizationScope($scope, $requestRefreshToken), ['nonce' => $nonce->value]);
     }
 
     /**

@@ -14,6 +14,7 @@ namespace Flownative\OpenIdConnect\Client;
  */
 
 use Flownative\OAuth2\Client\OAuthClientException;
+use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectEntryPoint;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
@@ -65,19 +66,64 @@ class OpenIdConnectEntryPointTest extends TestCase
         static::assertSame(303, $response->getStatusCode());
         static::assertSame(self::AUTHORIZATION_URI, $response->getHeaderLine('Location'));
         static::assertStringContainsString('content="0;url=https://id.example.com/authorize?state=abc&amp;client_id=the-client"', (string)$response->getBody());
+        static::assertSame('no-store', $response->getHeaderLine('Cache-Control'));
     }
 
     #[Test]
-    public function startAuthenticationReturnsToRequestedUriWithSignedServiceName(): void
+    public function startAuthenticationBindsAuthorizationToBrowserWithNonceCookie(): void
+    {
+        $authorizationParameters = [];
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturnCallback(
+            function (string $clientId, string $clientSecret, UriInterface $returnToUri, string $scope, array $givenAuthorizationParameters) use (&$authorizationParameters): UriInterface {
+                $authorizationParameters = $givenAuthorizationParameters;
+                return new Uri(self::AUTHORIZATION_URI);
+            }
+        );
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test']);
+
+        $response = $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure'), new Response());
+
+        static::assertMatchesRegularExpression('/^(flownative_oidc_nonce_[0-9a-f]{16})=([0-9a-f]{64}); Max-Age=3600; Path=\/; Secure; HttpOnly; SameSite=lax$/', $response->getHeaderLine('Set-Cookie'));
+        preg_match('/^([^=]+)=([^;]+);/', $response->getHeaderLine('Set-Cookie'), $matches);
+        static::assertTrue(Nonce::isBoundToCookies($authorizationParameters['nonce'], [$matches[1] => $matches[2]]));
+    }
+
+    public static function insecureCookieSettings(): array
+    {
+        return [
+            'cookie.secure' => [['cookie' => ['secure' => false]]],
+            'deprecated secureCookie' => [['secureCookie' => false, 'cookie' => ['secure' => true]]],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('insecureCookieSettings')]
+    public function startAuthenticationSetsNonceCookieWithoutSecureFlagIfConfigured(array $middlewareSettings): void
+    {
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturn(new Uri(self::AUTHORIZATION_URI));
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test']);
+        OpenIdConnectClientFixture::inject($entryPoint, 'middlewareSettings', $middlewareSettings);
+
+        $response = $entryPoint->startAuthentication(new ServerRequest('GET', 'http://localhost/secure'), new Response());
+
+        static::assertStringEndsWith('; Max-Age=3600; Path=/; HttpOnly; SameSite=lax', $response->getHeaderLine('Set-Cookie'));
+    }
+
+    #[Test]
+    public function startAuthenticationReturnsToRequestedUriWithSignedServiceNameAndNonce(): void
     {
         $hashService = OpenIdConnectClientFixture::createHashService();
         $returnToUri = null;
         $scope = null;
+        $authorizationParameters = [];
         $oAuthClient = $this->createStub(OAuthClient::class);
         $oAuthClient->method('startAuthorization')->willReturnCallback(
-            function (string $clientId, string $clientSecret, UriInterface $givenReturnToUri, string $givenScope) use (&$returnToUri, &$scope): UriInterface {
+            function (string $clientId, string $clientSecret, UriInterface $givenReturnToUri, string $givenScope, array $givenAuthorizationParameters) use (&$returnToUri, &$scope, &$authorizationParameters): UriInterface {
                 $returnToUri = $givenReturnToUri;
                 $scope = $givenScope;
+                $authorizationParameters = $givenAuthorizationParameters;
                 return new Uri(self::AUTHORIZATION_URI);
             }
         );
@@ -86,10 +132,61 @@ class OpenIdConnectEntryPointTest extends TestCase
         $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure?page=2'), new Response());
 
         parse_str($returnToUri->getQuery(), $queryParameters);
+        $tokenArguments = TokenArguments::fromSignedString($queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME], $hashService);
         static::assertSame('/secure', $returnToUri->getPath());
         static::assertSame('2', $queryParameters['page']);
-        static::assertSame('test', TokenArguments::fromSignedString($queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME], $hashService)[TokenArguments::SERVICE_NAME]);
+        static::assertSame('test', $tokenArguments[TokenArguments::SERVICE_NAME]);
+        static::assertSame($authorizationParameters['nonce'], $tokenArguments[TokenArguments::NONCE]);
         static::assertSame('profile email openid offline_access', $scope);
+    }
+
+    #[Test]
+    public function startAuthenticationRemovesParametersOfRejectedReturnFromReturnUri(): void
+    {
+        $returnToUri = null;
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturnCallback(
+            function (string $clientId, string $clientSecret, UriInterface $givenReturnToUri) use (&$returnToUri): UriInterface {
+                $returnToUri = $givenReturnToUri;
+                return new Uri(self::AUTHORIZATION_URI);
+            }
+        );
+        $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test']);
+
+        $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure?page=2&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=stale&' . $authorizationIdQueryParameterName . '=stale-id'), new Response());
+
+        parse_str($returnToUri->getQuery(), $queryParameters);
+        static::assertSame(['page', OpenIdConnectToken::OIDC_PARAMETER_NAME], array_keys($queryParameters));
+        static::assertNotSame('stale', $queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME]);
+    }
+
+    public static function pendingLogins(): array
+    {
+        return [
+            'below the limit' => [4, 0],
+            'at the limit' => [5, 5],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('pendingLogins')]
+    public function startAuthenticationRemovesNonceCookiesOfPendingLoginsAtTheLimit(int $numberOfPendingLogins, int $expectedNumberOfRemovedCookies): void
+    {
+        $cookies = ['flownative_oidc_jwt' => 'unrelated'];
+        for ($i = 0; $i < $numberOfPendingLogins; $i++) {
+            $cookie = Nonce::generate()->createCookie(true);
+            $cookies[$cookie->getName()] = $cookie->getValue();
+        }
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturn(new Uri(self::AUTHORIZATION_URI));
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test']);
+
+        $response = $entryPoint->startAuthentication((new ServerRequest('GET', 'https://www.example.com/secure'))->withCookieParams($cookies), new Response());
+
+        $setCookieHeaders = $response->getHeader('Set-Cookie');
+        static::assertCount($expectedNumberOfRemovedCookies + 1, $setCookieHeaders);
+        static::assertCount($expectedNumberOfRemovedCookies, array_filter($setCookieHeaders, static fn (string $header): bool => str_contains($header, '=; Expires=Thu, 01-Jan-1970 00:00:01 GMT')));
     }
 
     #[Test]

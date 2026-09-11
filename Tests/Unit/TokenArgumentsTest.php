@@ -25,12 +25,13 @@ class TokenArgumentsTest extends TestCase
     public function signedStringCanBeConvertedBackToTokenArguments(): void
     {
         $hashService = OpenIdConnectClientFixture::createHashService();
-        $signedString = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => 'test', TokenArguments::AUTHORIZATION_ID => 'authorization-1'], $hashService);
+        $signedString = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => 'test', TokenArguments::AUTHORIZATION_ID => 'authorization-1', TokenArguments::NONCE => 'the-nonce'], $hashService);
 
         $tokenArguments = TokenArguments::fromSignedString($signedString, $hashService);
 
         static::assertSame('test', $tokenArguments[TokenArguments::SERVICE_NAME]);
         static::assertSame('authorization-1', $tokenArguments[TokenArguments::AUTHORIZATION_ID]);
+        static::assertSame('the-nonce', $tokenArguments[TokenArguments::NONCE]);
     }
 
     #[Test]

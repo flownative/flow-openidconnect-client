@@ -35,6 +35,8 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
     protected bool $bearerAuthorizationHeaderGiven = false;
 
+    protected string $nonceCookieName = '';
+
     #[Flow\Inject]
     protected OpenIdConnectClientFactory $openIdConnectClientFactory;
 
@@ -55,6 +57,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
         $this->authorizationHeader = $httpRequest->getHeader('Authorization')[0] ?? '';
         $this->bearerAuthorizationHeaderGiven = str_contains($this->authorizationHeader, 'Bearer ');
         $this->refreshToken = '';
+        $this->nonceCookieName = '';
     }
 
     /**
@@ -94,12 +97,25 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
             try {
                 $client = $this->openIdConnectClientFactory->create($tokenArguments[TokenArguments::SERVICE_NAME]);
                 $tokenSet = $client->getIdentityToken($authorizationIdentifier);
-                $identityToken = $tokenSet->identityToken;
-                $this->refreshToken = $tokenSet->refreshToken;
                 $client->removeAuthorization($authorizationIdentifier);
             } catch (ServiceException | ConnectionException $exception) {
                 throw new AccessDeniedException('Could not retrieve the identity token of the finished authorization', 1560350413, $exception);
             }
+
+            $nonce = $tokenSet->identityToken->values['nonce'] ?? null;
+            if (!is_string($nonce)) {
+                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
+                throw new AccessDeniedException('The identity token of the finished authorization contains no nonce, although the authentication request sent one', 1789131857);
+            }
+            // The nonce must be the one of this authorization, and its secret must be in this browser
+            $expectedNonce = $tokenArguments[TokenArguments::NONCE];
+            if (!is_string($expectedNonce) || !hash_equals($expectedNonce, $nonce) || !Nonce::isBoundToCookies($nonce, $this->cookies)) {
+                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
+                throw new AccessDeniedException('The finished authorization was not started in this browser', 1789131856);
+            }
+            $identityToken = $tokenSet->identityToken;
+            $this->refreshToken = $tokenSet->refreshToken;
+            $this->nonceCookieName = Nonce::getCookieNameForValue($nonce);
         } else {
             $identityToken = $this->extractIdentityTokenFromCookie($cookieName);
         }
@@ -119,6 +135,14 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     public function hasBearerAuthorizationHeader(): bool
     {
         return $this->bearerAuthorizationHeaderGiven;
+    }
+
+    /**
+     * Returns the name of the nonce cookie which bound the finished authorization to this browser, or an empty string
+     */
+    public function getNonceCookieName(): string
+    {
+        return $this->nonceCookieName;
     }
 
     /**

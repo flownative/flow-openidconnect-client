@@ -16,6 +16,8 @@ use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectEntryPoint extends AbstractEntryPoint
 {
+    private const int MAXIMUM_PENDING_LOGINS = 5;
+
     /**
      * Not lazy, because a named injection would otherwise receive a dependency proxy which does not match the type.
      */
@@ -24,6 +26,9 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
 
     #[Flow\Inject]
     protected OpenIdConnectClientFactory $openIdConnectClientFactory;
+
+    #[Flow\InjectConfiguration(path: 'middleware')]
+    protected array $middlewareSettings = [];
 
     /**
      * @throws ConfigurationException
@@ -37,9 +42,10 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
             $this->logger?->debug('OpenID Connect: OpenIdConnectEntryPoint detected "Authorization" header', LogEnvironment::fromMethodName(__METHOD__));
         }
 
+        $nonce = Nonce::generate();
         $client = $this->openIdConnectClientFactory->create($this->options['serviceName']);
         try {
-            $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '', $this->options['requestRefreshToken'] ?? true);
+            $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '', $nonce, $this->options['requestRefreshToken'] ?? true);
         } catch (OAuthClientException | ServiceException $exception) {
             $this->logger?->error(sprintf('OpenID Connect: Authentication for service "%s" failed: %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return $response;
@@ -48,7 +54,25 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         $this->logger?->info(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" redirecting to %s', $this->options['serviceName'], $providerUri), LogEnvironment::fromMethodName(__METHOD__));
 
         $body = ContentStream::fromContents(sprintf('<html lang="en"><head><meta http-equiv="refresh" content="0;url=%s"/><title>OpenID Connect</title></head></html>', htmlentities((string)$providerUri, ENT_QUOTES, 'utf-8')));
-        return $response->withBody($body)->withStatus(303)->withHeader('Location', (string)$providerUri);
+        // The response carries the secret of the nonce, so no cache may store it
+        $response = $response
+            ->withBody($body)
+            ->withStatus(303)
+            ->withHeader('Location', (string)$providerUri)
+            ->withHeader('Cache-Control', 'no-store');
+
+        // The deprecated option "secureCookie" overrides "cookie.secure", as in SetJwtCookieMiddleware
+        $cookieSecure = $this->middlewareSettings['secureCookie'] ?? $this->middlewareSettings['cookie']['secure'] ?? true;
+
+        // Requests which fail authentication repeatedly, like XHR requests with an expired token, start a new login each time. Without a
+        // limit, their cookies would soon exceed the size of request headers which web servers accept.
+        $pendingNonceCookieNames = Nonce::findCookieNames($request->getCookieParams());
+        if (count($pendingNonceCookieNames) >= self::MAXIMUM_PENDING_LOGINS) {
+            foreach ($pendingNonceCookieNames as $cookieName) {
+                $response = $response->withAddedHeader('Set-Cookie', (string)Nonce::createRemovalCookie($cookieName, $cookieSecure));
+            }
+        }
+        return $response->withAddedHeader('Set-Cookie', (string)$nonce->createCookie($cookieSecure));
     }
 
     /**

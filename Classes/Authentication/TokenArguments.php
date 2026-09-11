@@ -17,6 +17,7 @@ final class TokenArguments implements ArrayAccess
 {
     public const string AUTHORIZATION_ID = 'id';
     public const string SERVICE_NAME = 'service';
+    public const string NONCE = 'nonce';
 
     private array $payload = [];
 
@@ -70,7 +71,7 @@ final class TokenArguments implements ArrayAccess
     public function offsetSet(mixed $offset, mixed $value): void
     {
         $this->payload[$offset] = match ($offset) {
-            self::AUTHORIZATION_ID, self::SERVICE_NAME => $value,
+            self::AUTHORIZATION_ID, self::SERVICE_NAME, self::NONCE => $value,
             default => throw new InvalidArgumentException(sprintf('OpenID Connect: Invalid argument name "%s" for token arguments', $offset), 1560162220),
         };
     }
