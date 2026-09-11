@@ -1,6 +1,8 @@
 <?php
 namespace Flownative\OpenIdConnect\Client;
 
+use DateTimeInterface;
+use InvalidArgumentException;
 use JsonException;
 use Lcobucci\JWT\Encoding\JoseEncoder;
 use Lcobucci\JWT\Token;
@@ -32,32 +34,32 @@ class IdentityToken
         $identityToken->jwt = $jwt;
 
         if (preg_match('/^[a-zA-Z0-9=_-]+\.([a-zA-Z0-9=_-]+\.)+[a-zA-Z0-9=_-]+$/', $jwt) !== 1) {
-            throw new \InvalidArgumentException('The given string was not a valid encoded identity token.', 1559204596);
+            throw new InvalidArgumentException('The given string was not a valid encoded identity token.', 1559204596);
         }
 
         $parts = explode('.', $jwt);
         if (count($parts) !== 3) {
-            throw new \InvalidArgumentException('The given JWT does not have exactly 3 parts (header, payload, signature), which is currently not supported by this implementation.', 1559208004);
+            throw new InvalidArgumentException('The given JWT does not have exactly 3 parts (header, payload, signature), which is currently not supported by this implementation.', 1559208004);
         }
 
         // The JSON Web Signature (JWS), see https://tools.ietf.org/html/rfc7515
         $identityToken->signature = self::base64UrlDecode(array_pop($parts));
         if (empty($identityToken->signature)) {
-            throw new \InvalidArgumentException('Failed decoding signature from JWT.', 1559207444);
+            throw new InvalidArgumentException('Failed decoding signature from JWT.', 1559207444);
         }
 
         // The JOSE Header (JSON Object Signing and Encryption), see: https://tools.ietf.org/html/rfc7515
         try {
             $header = json_decode(self::base64UrlDecode($parts[0]), true, 512, JSON_THROW_ON_ERROR);
             if (!is_array($header)) {
-                throw new \InvalidArgumentException('Failed decoding JOSE header from JWT.', 1559207497);
+                throw new InvalidArgumentException('Failed decoding JOSE header from JWT.', 1559207497);
             }
             $identityToken->header = $header;
         } catch (JsonException $e) {
-            throw new \InvalidArgumentException('Failed decoding JOSE header from JWT.', 1603362934, $e);
+            throw new InvalidArgumentException('Failed decoding JOSE header from JWT.', 1603362934, $e);
         }
         if (!isset($identityToken->header['alg'])) {
-            throw new \InvalidArgumentException('Missing signature algorithm in JOSE header from JWT.', 1559212231);
+            throw new InvalidArgumentException('Missing signature algorithm in JOSE header from JWT.', 1559212231);
         }
 
         // The JWT payload, including header, sans signature
@@ -66,10 +68,10 @@ class IdentityToken
         try {
             $identityTokenArray = json_decode(self::base64UrlDecode($parts[1]), true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException $e) {
-            throw new \InvalidArgumentException('Failed decoding identity token from JWT.', 1603362918, $e);
+            throw new InvalidArgumentException('Failed decoding identity token from JWT.', 1603362918, $e);
         }
         if (!is_array($identityTokenArray)) {
-            throw new \InvalidArgumentException('Failed decoding identity token from JWT.', 1559208043);
+            throw new InvalidArgumentException('Failed decoding identity token from JWT.', 1559208043);
         }
 
         $jwtParser = new Token\Parser(new JoseEncoder());
@@ -111,7 +113,7 @@ class IdentityToken
         return $isValid;
     }
 
-    public function isExpiredAt(\DateTimeInterface $now): bool
+    public function isExpiredAt(DateTimeInterface $now): bool
     {
         return $this->parsedJwt->isExpired($now);
     }
@@ -150,7 +152,7 @@ class IdentityToken
     private function verifyRsaJwtSignature(string $hashType, array $jwk, string $payload, string $signature): bool
     {
         if (!isset($jwk['n'], $jwk['e'])) {
-            throw new \InvalidArgumentException('Failed verifying RSA JWT signature because of an invalid JSON Web Key.', 1559214667);
+            throw new InvalidArgumentException('Failed verifying RSA JWT signature because of an invalid JSON Web Key.', 1559214667);
         }
         $key = PublicKeyLoader::load([
             'e' => new BigInteger(self::base64UrlDecode($jwk['e']), 256),

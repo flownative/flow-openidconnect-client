@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client;
 
+use Flownative\OAuth2\Client\OAuthClient as BaseOAuthClient;
 use Neos\Flow\Annotations as Flow;
 
 /**
@@ -20,9 +21,9 @@ use Neos\Flow\Annotations as Flow;
  * of OpenIdConnectClient as soon as the configuration options are needed
  * and if no such client has been injected yet.
  */
-class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
+class OAuthClient extends BaseOAuthClient
 {
-    public const SERVICE_TYPE= 'oidc';
+    public const string SERVICE_TYPE = 'oidc';
 
     /**
      * @var string

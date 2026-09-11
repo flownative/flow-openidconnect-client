@@ -6,6 +6,7 @@ use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OAuthClient;
 use GuzzleHttp\Psr7\Query;
+use InvalidArgumentException;
 use GuzzleHttp\Psr7\Utils;
 use Neos\Flow\Http\Cookie;
 use Neos\Flow\Log\Utility\LogEnvironment;
@@ -18,37 +19,14 @@ use Psr\Log\LoggerInterface;
 
 final class SetJwtCookieMiddleware implements MiddlewareInterface
 {
-    /**
-     * @var SecurityContext
-     */
-    private $securityContext;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $logger;
-
-    /**
-     * @var array
-     */
-    private $options;
-
-    /**
-     * @var array
-     */
-    private $authenticationProviderConfiguration;
-
-    public function __construct(array $options, array $authenticationProviderConfiguration, SecurityContext $securityContext, LoggerInterface $logger)
-    {
-        $this->options = $options;
-        $this->authenticationProviderConfiguration = $authenticationProviderConfiguration;
-        $this->securityContext = $securityContext;
-        $this->logger = $logger;
+    public function __construct(
+        private array $options,
+        private readonly array $authenticationProviderConfiguration,
+        private readonly SecurityContext $securityContext,
+        private readonly LoggerInterface $logger,
+    ) {
     }
 
-    /**
-     * @return void
-     */
     public function initializeObject(): void
     {
         if (isset($this->options['cookieName'])) {
@@ -59,16 +37,8 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
             $this->logger->warning('OpenID Connect: Option "secureCookie" was used - please use "cookie.secure" instead.', LogEnvironment::fromMethodName(__METHOD__));
             $this->options['cookie']['secure'] = $this->options['secureCookie'];
         }
-        if (!isset($this->options['disableTrustedProxiesComponentCompatibility'])) {
-            $this->options['disableTrustedProxiesComponentCompatibility'] = false;
-        }
     }
 
-    /**
-     * @param ServerRequestInterface $request
-     * @param RequestHandlerInterface $handler
-     * @return ResponseInterface
-     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $response = $handler->handle($request);
@@ -96,7 +66,7 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
             }
             try {
                 $identityToken = IdentityToken::fromJwt($account->getCredentialsSource());
-            } catch (\InvalidArgumentException) {
+            } catch (InvalidArgumentException) {
                 $this->logger->error(sprintf('OpenID Connect: No identity token found in credentials source of account %s - could not set JWT cookie.', $account->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
                 continue;
             }
@@ -116,29 +86,12 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
         return $response;
     }
 
-    /**
-     * @param ResponseInterface $response
-     * @param string $cookieName
-     * @param bool $secure
-     * @param bool $httpOnly
-     * @param string $sameSite
-     * @param string $jwt
-     * @return ResponseInterface
-     */
     private function setJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, bool $httpOnly, string $sameSite, string $jwt): ResponseInterface
     {
         $jwtCookie = new Cookie($cookieName, $jwt, 0, null, null, '/', $secure, $httpOnly, $sameSite);
         return $response->withAddedHeader('Set-Cookie', (string)$jwtCookie);
     }
 
-    /**
-     * @param ResponseInterface $response
-     * @param string $cookieName
-     * @param bool $secure
-     * @param bool $httpOnly
-     * @param string $sameSite
-     * @return ResponseInterface
-     */
     private function removeJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, bool $httpOnly, string $sameSite): ResponseInterface
     {
         $emptyJwtCookie = new Cookie($cookieName, '', 1, null, null, '/', $secure, $httpOnly, $sameSite);
@@ -148,10 +101,6 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
     /**
      * Removes any `?flownative_oidc=<...>&flownative_oauth2_authorization_id_oidc=<...>` from the request URL
      * by triggering a redirect to the URL without those query parameters
-     *
-     * @param ServerRequestInterface $request
-     * @param ResponseInterface $response
-     * @return ResponseInterface
      */
     private function withRedirectToRemoveOidcQueryParameters(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
     {

@@ -1,7 +1,10 @@
 <?php
+declare(strict_types=1);
 
 namespace Flownative\OpenIdConnect\Client;
 
-final class AuthenticationException extends \Exception
+use Exception;
+
+final class AuthenticationException extends Exception
 {
 }

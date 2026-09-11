@@ -7,12 +7,13 @@ use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OAuthClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
+use InvalidArgumentException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Mvc\ActionRequest;
-use Neos\Flow\Security\Cryptography\HashService;
 use Neos\Flow\Security\Authentication\Token\AbstractToken;
 use Neos\Flow\Security\Authentication\Token\SessionlessTokenInterface;
 use Neos\Flow\Security\Authentication\TokenInterface;
+use Neos\Flow\Security\Cryptography\HashService;
 use Neos\Flow\Security\Exception\AccessDeniedException;
 use Neos\Flow\Security\Exception\AuthenticationRequiredException;
 use Neos\Flow\Security\Exception\InvalidAuthenticationStatusException;
@@ -22,7 +23,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     /**
      * Name of the parameter used internally by this OpenID Connect client package in GET query parts
      */
-    public const OIDC_PARAMETER_NAME = 'flownative_oidc';
+    public const string OIDC_PARAMETER_NAME = 'flownative_oidc';
 
     protected array $queryParameters = [];
 
@@ -32,19 +33,11 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
     protected string $refreshToken = '';
 
-    /**
-     * @var OpenIdConnectClientFactory
-     */
     #[Flow\Inject]
-    protected $openIdConnectClientFactory;
+    protected OpenIdConnectClientFactory $openIdConnectClientFactory;
 
-    /**
-     * Not lazy, because it is passed on as a typed argument and a lazy dependency proxy would not match the type.
-     *
-     * @var HashService
-     */
-    #[Flow\Inject(lazy: false)]
-    protected $hashService;
+    #[Flow\Inject]
+    protected HashService $hashService;
 
     /**
      * @throws InvalidAuthenticationStatusException
@@ -83,7 +76,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
             }
             try {
                 $tokenArguments = TokenArguments::fromSignedString($this->queryParameters[self::OIDC_PARAMETER_NAME], $this->hashService);
-            } catch (\InvalidArgumentException $exception) {
+            } catch (InvalidArgumentException $exception) {
                 $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
                 throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
             }
@@ -125,7 +118,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
         try {
             $jwt = substr($authorizationHeader, strlen('Bearer '));
             $identityToken = IdentityToken::fromJwt($jwt);
-        } catch (\InvalidArgumentException $exception) {
+        } catch (InvalidArgumentException $exception) {
             $this->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
             throw new AccessDeniedException('Could not extract JWT from Authorization header', 1589283968, $exception);
         }
@@ -145,7 +138,7 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
         }
         try {
             $identityToken = IdentityToken::fromJwt($jwt);
-        } catch (\InvalidArgumentException $exception) {
+        } catch (InvalidArgumentException $exception) {
             $this->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
             throw new AuthenticationRequiredException(sprintf('Could not extract JWT from cookie "%s"', $cookieName), 1560349541, $exception);
         }
