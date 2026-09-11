@@ -13,15 +13,15 @@ final class TokenArguments implements \ArrayAccess
     public const SERVICE_NAME = 'service';
 
     /**
-     * @Flow\Inject
      * @var HashService
      */
+    #[Flow\Inject]
     protected $hashService;
 
     /**
-     * @Flow\Inject
      * @var LoggerInterface
      */
+    #[Flow\Inject]
     protected $logger;
 
     /**

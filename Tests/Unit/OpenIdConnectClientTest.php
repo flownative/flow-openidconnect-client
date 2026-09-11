@@ -20,6 +20,8 @@ use League\OAuth2\Client\Token\AccessToken;
 use Neos\Cache\Backend\TransientMemoryBackend;
 use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\Utility\Algorithms;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\StreamInterface;
@@ -77,7 +79,7 @@ class OpenIdConnectClientTest extends TestCase
         $this->jwksCache = new VariableFrontend('jwks', new TransientMemoryBackend());
         $this->jwksCache->initializeObject();
 
-        $this->oAuthClient = $this->createPartialMock(OAuthClient::class, ['getAuthorization']);
+        $this->oAuthClient = $this->createStub(OAuthClient::class);
 
         $logger = $this->createStub(LoggerInterface::class);
 
@@ -88,10 +90,7 @@ class OpenIdConnectClientTest extends TestCase
         $this->inject($this->oidcClient, 'logger', $logger);
     }
 
-    /**
-     * @test
-     * @throws
-     */
+    #[Test]
     public function getJwksReturnsJwksAndStoresItInCache(): void
     {
         $mockHttpClient = $this->createMock(HttpClient::class);
@@ -115,14 +114,11 @@ class OpenIdConnectClientTest extends TestCase
         static::assertSame($expectedJwks, $this->jwksCache->get($cacheEntryIdentifier));
     }
 
-    /**
-     * @test
-     * @throws
-     */
+    #[Test]
     public function getJwksThrowsExceptionOnFailedDiscoveryRequest(): void
     {
         $mockHttpClient = $this->createMock(HttpClient::class);
-        $mockHttpRequest = $this->createMock(Request::class);
+        $mockHttpRequest = $this->createStub(Request::class);
 
         $this->inject($this->oidcClient, 'settings', $this->settings);
         $this->inject($this->oidcClient, 'httpClient', $mockHttpClient);
@@ -134,10 +130,7 @@ class OpenIdConnectClientTest extends TestCase
         $this->oidcClient->getJwks();
     }
 
-    /**
-     * @test
-     * @throws
-     */
+    #[Test]
     public function getJwksThrowsExceptionOnMalformedResponseFromDiscoveryService(): void
     {
         $mockHttpClient = $this->createMock(HttpClient::class);
@@ -156,10 +149,7 @@ class OpenIdConnectClientTest extends TestCase
         $this->oidcClient->getJwks();
     }
 
-    /**
-     * @test
-     * @throws
-     */
+    #[Test]
     public function getJwksReturnsJwksFromCacheIfItExists(): void
     {
         $this->inject($this->oidcClient, 'settings', $this->settings);
@@ -172,10 +162,7 @@ class OpenIdConnectClientTest extends TestCase
         static::assertSame($expectedJwks, $this->oidcClient->getJwks());
     }
 
-    /**
-     * @test
-     * @throws
-     */
+    #[Test]
     public function getAccessTokenReturnsAccessTokenFromAuthorization(): void
     {
         $serviceName = 'test';
@@ -192,7 +179,7 @@ class OpenIdConnectClientTest extends TestCase
         $authorization = new Authorization($authorizationId, $serviceName, $clientId, Authorization::GRANT_CLIENT_CREDENTIALS, $scope);
         $authorization->setSerializedAccessToken(json_encode($expectedAccessToken, JSON_THROW_ON_ERROR, 512));
 
-        $this->oAuthClient->method('getAuthorization')->with($authorizationId)->willReturn($authorization);
+        $this->oAuthClient->method('getAuthorization')->willReturnMap([[$authorizationId, $authorization]]);
 
         $actualAccessToken = $this->oidcClient->getAccessToken($serviceName, $clientId, $clientSecret, $scope);
 
@@ -212,15 +199,11 @@ class OpenIdConnectClientTest extends TestCase
         ];
     }
 
-    /**
-     * @test
-     * @dataProvider authorizationScopes
-     * @throws
-     */
+    #[Test]
+    #[DataProvider('authorizationScopes')]
     public function buildAuthorizationScopeAddsRequiredScopeIdentifiers(string $scope, bool $requestRefreshToken, string $expectedScope): void
     {
         $method = new \ReflectionMethod(OpenIdConnectClient::class, 'buildAuthorizationScope');
-        $method->setAccessible(true);
 
         static::assertSame($expectedScope, $method->invoke($this->oidcClient, $scope, $requestRefreshToken));
     }
@@ -253,7 +236,6 @@ class OpenIdConnectClientTest extends TestCase
             $target->$methodName($dependency);
         } elseif ($objectReflection->hasProperty($name)) {
             $property = $objectReflection->getProperty($name);
-            $property->setAccessible(true);
             $property->setValue($target, $dependency);
         } else {
             throw new \RuntimeException('Could not inject ' . $name . ' into object of type ' . get_class($target));

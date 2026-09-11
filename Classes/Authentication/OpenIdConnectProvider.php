@@ -29,33 +29,33 @@ use Psr\Log\LoggerInterface;
 final class OpenIdConnectProvider extends AbstractProvider
 {
     /**
-     * @Flow\Inject(lazy = false)
      * @var Context
      */
+    #[Flow\Inject(lazy: false)]
     protected $securityContext;
 
     /**
-     * @Flow\Inject(lazy = false)
      * @var PolicyService
      */
+    #[Flow\Inject(lazy: false)]
     protected $policyService;
 
     /**
-     * @Flow\Inject(name="Neos.Flow:SecurityLogger")
      * @var LoggerInterface
      */
+    #[Flow\Inject(name: 'Neos.Flow:SecurityLogger')]
     protected $logger;
 
     /**
-     * @Flow\Inject
      * @var AccountRepository
      */
+    #[Flow\Inject]
     protected $accountRepository;
 
     /**
-     * @Flow\Inject
      * @var SessionInterface
      */
+    #[Flow\Inject]
     protected $session;
 
     /**
@@ -206,9 +206,8 @@ final class OpenIdConnectProvider extends AbstractProvider
      * @param TokenInterface $authenticationToken
      * @param IdentityToken $identityToken
      * @param Role[] $roles
-     * @return void
-     * @Flow\Signal()
      */
+    #[Flow\Signal]
     public function emitAuthenticated(TokenInterface $authenticationToken, IdentityToken $identityToken, array $roles): void
     {
     }

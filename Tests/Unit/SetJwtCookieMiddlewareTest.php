@@ -17,6 +17,8 @@ use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Psr7\Uri;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\Context as SecurityContext;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -79,11 +81,11 @@ class SetJwtCookieMiddlewareTest extends TestCase
 
     public function setUp(): void
     {
-        $this->mockSecurityContext = $this->getMockBuilder(SecurityContext::class)->disableOriginalConstructor()->getMock();
-        $this->mockLogger = $this->getMockBuilder(LoggerInterface::class)->getMock();
-        $this->mockRequest = $this->getMockBuilder(ServerRequestInterface::class)->getMock();
+        $this->mockSecurityContext = $this->createStub(SecurityContext::class);
+        $this->mockLogger = $this->createStub(LoggerInterface::class);
+        $this->mockRequest = $this->createStub(ServerRequestInterface::class);
         $this->mockRequest->method('getUri')->willReturn(new Uri('http://localhost'));
-        $this->mockOriginalResponse = $this->getMockBuilder(ResponseInterface::class)->getMock();
+        $this->mockOriginalResponse = $this->createStub(ResponseInterface::class);
 
         $this->mockNextRequestHandler = new class implements RequestHandlerInterface {
             public $originalResponse;
@@ -103,20 +105,17 @@ class SetJwtCookieMiddlewareTest extends TestCase
         return $middleware;
     }
 
-    /**
-     * @test
-     */
+    #[Test]
     public function processReturnsUnalteredResponseOfInnerMiddlewareChainIfSecurityContextIsNotInitialized(): void
     {
-        $middleware = $this->getMiddleware();
+        $this->mockSecurityContext = $this->createMock(SecurityContext::class);
         $this->mockSecurityContext->expects($this->atLeastOnce())->method('isInitialized')->willReturn(false);
+        $middleware = $this->getMiddleware();
         $response = $middleware->process($this->mockRequest, $this->mockNextRequestHandler);
         self::assertSame($response, $this->mockOriginalResponse);
     }
 
-    /**
-     * @test
-     */
+    #[Test]
     public function processReturnsUnalteredResponseOfInnerMiddlewareChainIfNoOidcAuthenticationTokensAreActive(): void
     {
         $middleware = $this->getMiddleware();
@@ -151,10 +150,8 @@ class SetJwtCookieMiddlewareTest extends TestCase
         ];
     }
 
-    /**
-     * @test
-     * @dataProvider removeJwtCookieDataProvider
-     */
+    #[Test]
+    #[DataProvider('removeJwtCookieDataProvider')]
     public function removeJwtCookieTests(array $options, array $authenticationProviderConfiguration, array $authenticatedTokens, array $activeCookies, ?string $expectedCookieHeader = null): void
     {
         $middleware = $this->getMiddleware($options, $authenticationProviderConfiguration);
@@ -203,10 +200,8 @@ class SetJwtCookieMiddlewareTest extends TestCase
         ];
     }
 
-    /**
-     * @test
-     * @dataProvider setJwtCookieDataProvider
-     */
+    #[Test]
+    #[DataProvider('setJwtCookieDataProvider')]
     public function setJwtCookieTests(array $options, array $authenticationProviderConfiguration, array $authenticatedTokens, array $activeCookies, ?string $expectedCookieHeader = null): void
     {
         $middleware = $this->getMiddleware($options, $authenticationProviderConfiguration);
@@ -214,11 +209,11 @@ class SetJwtCookieMiddlewareTest extends TestCase
         $this->mockSecurityContext->method('getAccountByAuthenticationProviderName')->willReturnCallback(function(string $providerName) {
             switch ($providerName) {
                 case 'SomeProvider':
-                    $mockAccount = $this->getMockBuilder(Account::class)->disableOriginalConstructor()->getMock();
+                    $mockAccount = $this->createStub(Account::class);
                     $mockAccount->method('getCredentialsSource')->willReturn(self::JWT_NODY);
                     break;
                 case 'SomeOtherProvider':
-                    $mockAccount = $this->getMockBuilder(Account::class)->disableOriginalConstructor()->getMock();
+                    $mockAccount = $this->createStub(Account::class);
                     $mockAccount->method('getCredentialsSource')->willReturn(self::JWT_JODY);
                     break;
             }
@@ -242,17 +237,17 @@ class SetJwtCookieMiddlewareTest extends TestCase
         }
     }
 
-    /**
-     * @test
-     */
+    #[Test]
     public function processDoesNotSetCookieHeaderIfAuthenticatedAccountDoesNotContainIdentityToken(): void
     {
         $middleware = $this->getMiddleware();
         $this->mockSecurityContext->method('isInitialized')->willReturn(true);
-        $mockAccount = $this->getMockBuilder(Account::class)->disableOriginalConstructor()->getMock();
+        $mockAccount = $this->createStub(Account::class);
         $mockAccount->method('getCredentialsSource')->willReturn('not-a-jwt-string');
         $this->mockSecurityContext->method('getAccountByAuthenticationProviderName')->willReturn($mockAccount);
-        $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([new OpenIdConnectToken()]);
+        $token = new OpenIdConnectToken();
+        $token->setAuthenticationProviderName('SomeProvider');
+        $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([$token]);
 
         $this->mockNextRequestHandler->originalResponse = new Response();
         $response = $middleware->process($this->mockRequest, $this->mockNextRequestHandler);
@@ -273,16 +268,14 @@ class SetJwtCookieMiddlewareTest extends TestCase
         ];
     }
 
-    /**
-     * @test
-     * @dataProvider removeOidcQueryParametersDataProvider
-     */
+    #[Test]
+    #[DataProvider('removeOidcQueryParametersDataProvider')]
     public function removeOidcQueryParametersTests(string $requestUri, ?string $expectedLocationHeader = null): void
     {
         $middleware = $this->getMiddleware();
         $this->mockSecurityContext->method('isInitialized')->willReturn(true);
         $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([]);
-        $mockRequest = $this->getMockBuilder(ServerRequestInterface::class)->getMock();
+        $mockRequest = $this->createStub(ServerRequestInterface::class);
         $mockRequest->method('getUri')->willReturn(new Uri($requestUri));
         $this->mockNextRequestHandler->originalResponse = new Response();
         $response = $middleware->process($mockRequest, $this->mockNextRequestHandler);
@@ -293,15 +286,13 @@ class SetJwtCookieMiddlewareTest extends TestCase
         }
     }
 
-    /**
-     * @test
-     */
+    #[Test]
     public function removeOidcQueryParametersDoesNotAlterLocationHeaderIfOneIsPresentAlready(): void
     {
         $middleware = $this->getMiddleware();
         $this->mockSecurityContext->method('isInitialized')->willReturn(true);
         $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([]);
-        $mockRequest = $this->getMockBuilder(ServerRequestInterface::class)->getMock();
+        $mockRequest = $this->createStub(ServerRequestInterface::class);
         $mockRequest->method('getUri')->willReturn(new Uri('http://localhost?flownative_oidc=foo&flownative_oauth2_authorization_id_oidc=bar'));
         $responseWithLocationHeader = new Response(200, ['Location' => 'http://original-redirect.tld']);
         $this->mockNextRequestHandler->originalResponse = $responseWithLocationHeader;

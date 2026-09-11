@@ -44,9 +44,9 @@ final class OpenIdConnectClient
     private $oAuthClient;
 
     /**
-     * @Flow\InjectConfiguration
      * @var array
      */
+    #[Flow\InjectConfiguration]
     protected $settings;
 
     /**
@@ -55,9 +55,9 @@ final class OpenIdConnectClient
     protected $httpClient;
 
     /**
-     * @Flow\Inject(name="Neos.Flow:SecurityLogger")
      * @var LoggerInterface
      */
+    #[Flow\Inject(name: 'Neos.Flow:SecurityLogger')]
     protected $logger;
 
     /**
@@ -350,7 +350,11 @@ final class OpenIdConnectClient
             } catch (GuzzleException $e) {
                 throw new ConnectionException(sprintf('OpenID Connect Client: Failed discovering options at %s: %s', $discoveryUri, $e->getMessage()), 1554902567);
             }
-            $discoveredOptions = \GuzzleHttp\json_decode($response->getBody()->getContents(), true);
+            try {
+                $discoveredOptions = json_decode($response->getBody()->getContents(), true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                $discoveredOptions = null;
+            }
             if (!is_array($discoveredOptions)) {
                 throw new ConnectionException('OpenID Connect Client: Discovery endpoint returned invalid response.', 1554903349);
             }
