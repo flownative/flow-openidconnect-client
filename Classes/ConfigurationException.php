@@ -2,6 +2,8 @@
 
 namespace Flownative\OpenIdConnect\Client;
 
-final class ConfigurationException extends \Exception
+use Exception;
+
+final class ConfigurationException extends Exception
 {
 }

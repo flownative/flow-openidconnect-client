@@ -10,6 +10,8 @@ use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
+use InvalidArgumentException;
+use JsonException;
 use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
 use League\OAuth2\Client\Token\AccessToken;
 use Neos\Cache\Exception as CacheException;
@@ -20,9 +22,31 @@ use Neos\Flow\Security\Cryptography\HashService;
 use Neos\Utility\Arrays;
 use Psr\Http\Message\UriInterface;
 use Psr\Log\LoggerInterface;
+use RuntimeException;
+use SodiumException;
 
 final class OpenIdConnectClient
 {
+    private const array DEFAULT_OPTIONS = [
+        'issuer' => '',
+        'clientId' => '',
+        'clientSecret' => '',
+        'authorizationEndpoint' => '',
+        'tokenEndpoint' => '',
+        'userInfoEndpoint' => '',
+        'jwksUri' => '',
+        'scopesSupported' => ''
+    ];
+
+    private const array DISCOVERY_OPTIONS_MAPPING = [
+        'issuer' => 'issuer',
+        'authorization_endpoint' => 'authorizationEndpoint',
+        'token_endpoint' => 'tokenEndpoint',
+        'userinfo_endpoint' => 'userInfoEndpoint',
+        'jwks_uri' => 'jwksUri',
+        'scopes_supported' => 'scopesSupported'
+    ];
+
     /**
      * Service name which identifies the configuration of this OpenID Connect Client instance
      */
@@ -58,35 +82,6 @@ final class OpenIdConnectClient
      */
     protected $jwksCache;
 
-    /**
-     * @const array
-     */
-    private const DEFAULT_OPTIONS = [
-        'issuer' => '',
-        'clientId' => '',
-        'clientSecret' => '',
-        'authorizationEndpoint' => '',
-        'tokenEndpoint' => '',
-        'userInfoEndpoint' => '',
-        'jwksUri' => '',
-        'scopesSupported' => ''
-    ];
-
-    /**
-     * @const array
-     */
-    private const DISCOVERY_OPTIONS_MAPPING = [
-        'issuer' => 'issuer',
-        'authorization_endpoint' => 'authorizationEndpoint',
-        'token_endpoint' => 'tokenEndpoint',
-        'userinfo_endpoint' => 'userInfoEndpoint',
-        'jwks_uri' => 'jwksUri',
-        'scopes_supported' => 'scopesSupported'
-    ];
-
-    /**
-     * @param string $serviceName
-     */
     public function __construct(string $serviceName)
     {
         $this->serviceName = $serviceName;
@@ -123,9 +118,6 @@ final class OpenIdConnectClient
         $this->oAuthClient->setOpenIdConnectClient($this);
     }
 
-    /**
-     * @return array
-     */
     public function getOptions(): array
     {
         return $this->options;
@@ -149,7 +141,7 @@ final class OpenIdConnectClient
      * @throws ConnectionException
      * @throws IdentityProviderException
      * @throws GuzzleException
-     * @throws \SodiumException
+     * @throws SodiumException
      */
     public function getAccessToken(string $serviceName, string $clientId, string $clientSecret, string $scope, array $additionalParameters = []): AccessToken
     {
@@ -181,7 +173,6 @@ final class OpenIdConnectClient
             if ($accessToken === null) {
                 throw new AuthenticationException(sprintf('OpenID Connect Client: Failed retrieving access token for service "%s", clientId "%s": Authorization %s contains no token', $serviceName, $clientId, $authorizationId));
             }
-
         } else {
             $expiresInSeconds = $accessToken->getExpires() - time();
             $this->logger?->debug(sprintf('OpenID Connect Client: Using existing access token for service %s using client id %s %s. Remaining lifetime: %d seconds', $serviceName, $clientId, ($scope ? 'with scope "' . $scope . '"' : 'without a scope'), $expiresInSeconds), LogEnvironment::fromMethodName(__METHOD__));
@@ -203,12 +194,12 @@ final class OpenIdConnectClient
     {
         $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $this->serviceName], $this->hashService);
         if (str_starts_with($returnArguments, 'ERROR')) {
-            throw new \RuntimeException(substr($returnArguments, 6));
+            throw new RuntimeException(substr($returnArguments, 6));
         }
         $returnToUri = $returnToUri->withQuery(trim($returnToUri->getQuery() . '&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=' . urlencode($returnArguments), '&'));
 
         if (empty($this->options['clientId']) || empty($this->options['clientSecret'])) {
-            throw new \RuntimeException(sprintf('OpenID Connect Client: Authorization Code Flow requires "clientId" and "clientSecret" to be configured for service "%s".', $this->serviceName), 1596456168);
+            throw new RuntimeException(sprintf('OpenID Connect Client: Authorization Code Flow requires "clientId" and "clientSecret" to be configured for service "%s".', $this->serviceName), 1596456168);
         }
         return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $this->buildAuthorizationScope($scope, $requestRefreshToken));
     }
@@ -217,7 +208,7 @@ final class OpenIdConnectClient
      * Returns the current identity token and refresh token in a TokenSet
      *
      * @throws ConnectionException
-     * @throws ServiceException|\SodiumException
+     * @throws ServiceException|SodiumException
      */
     public function getIdentityToken(string $authorizationIdentifier): TokenSet
     {
@@ -238,7 +229,7 @@ final class OpenIdConnectClient
                 IdentityToken::fromJwt($tokenValues['id_token']),
                 $accessToken->getRefreshToken()
             );
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             throw new ServiceException('OpenID Connect Client: Failed parsing identity token from JWT', 1602501992, $e);
         }
     }
@@ -272,7 +263,7 @@ final class OpenIdConnectClient
 
             try {
                 $response = json_decode($response->getBody()->getContents(), true, 512, JSON_THROW_ON_ERROR);
-            } catch (\JsonException $e) {
+            } catch (JsonException $e) {
                 throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1739990452, $e);
             }
             if (!is_array($response) || !isset($response['keys'])) {
@@ -308,7 +299,7 @@ final class OpenIdConnectClient
 
         try {
             $response = json_decode($response->getBody()->getContents(), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
+        } catch (JsonException $e) {
             throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while refreshing identity token from %s', $tokenEndpoint), 1741193238, $e);
         }
         if (!is_array($response) || !isset($response['id_token'])) {
@@ -317,8 +308,8 @@ final class OpenIdConnectClient
 
         try {
             $result = new TokenSet(IdentityToken::fromJwt($response['id_token']), '');
-        } catch (\InvalidArgumentException $e) {
-            throw new ServiceException(sprintf('OpenID Connect Client: Could not  construct identity token from response data while refreshing identity token from %s', $tokenEndpoint), 1741271679, $e);
+        } catch (InvalidArgumentException $e) {
+            throw new ServiceException(sprintf('OpenID Connect Client: Could not construct identity token from response data while refreshing identity token from %s', $tokenEndpoint), 1741271679, $e);
         }
 
         return $result;
@@ -340,7 +331,7 @@ final class OpenIdConnectClient
             }
             try {
                 $discoveredOptions = json_decode($response->getBody()->getContents(), true, 512, JSON_THROW_ON_ERROR);
-            } catch (\JsonException) {
+            } catch (JsonException) {
                 $discoveredOptions = null;
             }
             if (!is_array($discoveredOptions)) {

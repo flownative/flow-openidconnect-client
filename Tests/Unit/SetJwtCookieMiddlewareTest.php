@@ -99,7 +99,6 @@ class SetJwtCookieMiddlewareTest extends TestCase
 
     private function getMiddleware(array $options = [], array $authenticationProviderConfiguration = []): SetJwtCookieMiddleware
     {
-        $options['disableTrustedProxiesComponentCompatibility'] = true;
         $middleware = new SetJwtCookieMiddleware($options, $authenticationProviderConfiguration, $this->mockSecurityContext, $this->mockLogger);
         $middleware->initializeObject();
         return $middleware;

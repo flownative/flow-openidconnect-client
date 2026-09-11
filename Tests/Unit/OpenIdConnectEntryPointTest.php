@@ -19,6 +19,7 @@ use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\OpenIdConnectClientFixtu
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Psr7\ServerRequest;
 use GuzzleHttp\Psr7\Uri;
+use Neos\Flow\Security\Cryptography\HashService;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -118,7 +119,7 @@ class OpenIdConnectEntryPointTest extends TestCase
         static::assertSame($originalResponse, $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/'), $originalResponse));
     }
 
-    private function createEntryPoint(OAuthClient $oAuthClient, array $options, ?\Neos\Flow\Security\Cryptography\HashService $hashService = null): OpenIdConnectEntryPoint
+    private function createEntryPoint(OAuthClient $oAuthClient, array $options, ?HashService $hashService = null): OpenIdConnectEntryPoint
     {
         $logger = $this->createStub(LoggerInterface::class);
         $client = OpenIdConnectClientFixture::createClient($oAuthClient, $hashService ?? OpenIdConnectClientFixture::createHashService(), $logger);

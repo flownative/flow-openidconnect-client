@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
+use DateTimeImmutable;
 use Flownative\OpenIdConnect\Client\AuthenticationException;
 use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
@@ -16,8 +17,8 @@ use Neos\Flow\Security\Account;
 use Neos\Flow\Security\AccountRepository;
 use Neos\Flow\Security\Authentication\Provider\AbstractProvider;
 use Neos\Flow\Security\Authentication\TokenInterface;
-use Neos\Flow\Security\Context;
 use Neos\Flow\Security\Exception as SecurityException;
+use Neos\Flow\Security\Exception\AuthenticationRequiredException;
 use Neos\Flow\Security\Exception\InvalidAuthenticationStatusException;
 use Neos\Flow\Security\Exception\NoSuchRoleException;
 use Neos\Flow\Security\Exception\UnsupportedAuthenticationTokenException;
@@ -25,12 +26,10 @@ use Neos\Flow\Security\Policy\PolicyService;
 use Neos\Flow\Security\Policy\Role;
 use Neos\Flow\Session\SessionInterface;
 use Psr\Log\LoggerInterface;
+use RuntimeException;
 
 final class OpenIdConnectProvider extends AbstractProvider
 {
-    #[Flow\Inject]
-    protected Context $securityContext;
-
     #[Flow\Inject]
     protected PolicyService $policyService;
 
@@ -49,16 +48,12 @@ final class OpenIdConnectProvider extends AbstractProvider
     #[Flow\Inject]
     protected OpenIdConnectClientFactory $openIdConnectClientFactory;
 
-    /**
-     * @return array
-     */
     public function getTokenClassNames(): array
     {
         return [OpenIdConnectToken::class];
     }
 
     /**
-     * @param TokenInterface $authenticationToken
      * @throws AuthenticationException
      * @throws CacheException
      * @throws ConnectionException
@@ -75,10 +70,10 @@ final class OpenIdConnectProvider extends AbstractProvider
             throw new UnsupportedAuthenticationTokenException(sprintf('The OpenID Connect authentication provider cannot authenticate the given token of type %s.', get_class($authenticationToken)), 1559805996);
         }
         if (!isset($this->options['roles']) && !isset($this->options['rolesFromClaims']) && !isset($this->options['addRolesFromExistingAccount'])) {
-            throw new \RuntimeException('Either "roles", "rolesFromClaims" or "addRolesFromExistingAccount" must be specified in the configuration of OpenID Connect authentication provider', 1559806095);
+            throw new RuntimeException('Either "roles", "rolesFromClaims" or "addRolesFromExistingAccount" must be specified in the configuration of OpenID Connect authentication provider', 1559806095);
         }
         if (!isset($this->options['serviceName'])) {
-            throw new \RuntimeException('Missing "serviceName" option in the configuration of OpenID Connect authentication provider', 1561480057);
+            throw new RuntimeException('Missing "serviceName" option in the configuration of OpenID Connect authentication provider', 1561480057);
         }
         if (!isset($this->options['accountIdentifierTokenValueName'])) {
             $this->options['accountIdentifierTokenValueName'] = 'sub';
@@ -116,7 +111,7 @@ final class OpenIdConnectProvider extends AbstractProvider
                 }
             }
             $this->logger?->debug(sprintf('OpenID Connect: Successfully verified signature of identity token with %s value "%s"', $this->options['accountIdentifierTokenValueName'], $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? 'unknown'), LogEnvironment::fromMethodName(__METHOD__));
-        } catch (SecurityException\AuthenticationRequiredException) {
+        } catch (AuthenticationRequiredException) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
             return;
         } catch (SecurityException $exception) {
@@ -127,7 +122,7 @@ final class OpenIdConnectProvider extends AbstractProvider
             return;
         }
 
-        if ($identityToken->isExpiredAt(new \DateTimeImmutable())) {
+        if ($identityToken->isExpiredAt(new DateTimeImmutable())) {
             if ($this->session->canBeResumed()) {
                 $this->session->resume();
             }
@@ -135,31 +130,29 @@ final class OpenIdConnectProvider extends AbstractProvider
                 $this->session->start();
             }
             if ($this->session->isStarted()) {
-                if ($this->session->isStarted()) {
-                    $refreshToken = (string)$this->session->getData('flownative_oidc_refresh');
-                    if ($refreshToken !== '') {
-                        $this->logger?->info(sprintf('OpenID Connect: The JWT "%s" is expired, trying to refresh with refresh token from session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
-                        try {
-                            $tokenSet = $this->openIdConnectClientFactory->create($this->options['serviceName'])->refreshIdentityToken($identityToken, $refreshToken);
-                            $identityToken = $tokenSet->identityToken;
-                            $refreshToken = $tokenSet->refreshToken;
-                            if ($refreshToken !== '') {
-                                $this->logger?->debug(sprintf('OpenID Connect: Set new refresh token with value "%s" in session', $refreshToken), LogEnvironment::fromMethodName(__METHOD__));
-                                $this->session->putData('flownative_oidc_refresh', $refreshToken);
-                            } else {
-                                $this->logger?->info('OpenID Connect: Did not receive new refresh token to set in session', LogEnvironment::fromMethodName(__METHOD__));
-                            }
-                        } catch (ConnectionException|ServiceException $e) {
-                            $this->logger?->info(sprintf('OpenID Connect: Could not refresh JWT: %s', $e->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+                $refreshToken = (string)$this->session->getData('flownative_oidc_refresh');
+                if ($refreshToken !== '') {
+                    $this->logger?->info(sprintf('OpenID Connect: The JWT "%s" is expired, trying to refresh with refresh token from session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
+                    try {
+                        $tokenSet = $this->openIdConnectClientFactory->create($this->options['serviceName'])->refreshIdentityToken($identityToken, $refreshToken);
+                        $identityToken = $tokenSet->identityToken;
+                        $refreshToken = $tokenSet->refreshToken;
+                        if ($refreshToken !== '') {
+                            $this->logger?->debug(sprintf('OpenID Connect: Set new refresh token with value "%s" in session', $refreshToken), LogEnvironment::fromMethodName(__METHOD__));
+                            $this->session->putData('flownative_oidc_refresh', $refreshToken);
+                        } else {
+                            $this->logger?->info('OpenID Connect: Did not receive new refresh token to set in session', LogEnvironment::fromMethodName(__METHOD__));
                         }
-                    } else {
-                        $this->logger?->info(sprintf('OpenID Connect: The JWT "%s" is expired, no refresh token in session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
+                    } catch (ConnectionException|ServiceException $e) {
+                        $this->logger?->info(sprintf('OpenID Connect: Could not refresh JWT: %s', $e->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
                     }
+                } else {
+                    $this->logger?->info(sprintf('OpenID Connect: The JWT "%s" is expired, no refresh token in session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
                 }
             }
         }
 
-        if ($identityToken->isExpiredAt(new \DateTimeImmutable())) {
+        if ($identityToken->isExpiredAt(new DateTimeImmutable())) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
             $this->logger?->info(sprintf('OpenID Connect: The JWT token "%s" is expired, need to re-authenticate', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
             return;
@@ -185,17 +178,12 @@ final class OpenIdConnectProvider extends AbstractProvider
         $this->emitAuthenticated($authenticationToken, $identityToken, $this->policyService->getRoles());
     }
 
-    /**
-     * @return string
-     */
     public function getServiceName(): string
     {
         return $this->options['serviceName'] ?? '';
     }
 
     /**
-     * @param TokenInterface $authenticationToken
-     * @param IdentityToken $identityToken
      * @param Role[] $roles
      */
     #[Flow\Signal]
@@ -204,10 +192,6 @@ final class OpenIdConnectProvider extends AbstractProvider
     }
 
     /**
-     * @param string $accountIdentifier
-     * @param array $roleIdentifiers
-     * @param string $jwt
-     * @return Account
      * @throws NoSuchRoleException
      */
     private function createTransientAccount(string $accountIdentifier, array $roleIdentifiers, string $jwt): Account
@@ -222,11 +206,6 @@ final class OpenIdConnectProvider extends AbstractProvider
         return $account;
     }
 
-    /**
-     * @param string $expectedAudience
-     * @param IdentityToken $identityToken
-     * @return bool
-     */
     private function audienceMatches(string $expectedAudience, IdentityToken $identityToken): bool
     {
         if (empty($expectedAudience)) {
@@ -244,10 +223,6 @@ final class OpenIdConnectProvider extends AbstractProvider
         return true;
     }
 
-    /**
-     * @param IdentityToken $identityToken
-     * @return array
-     */
     private function getConfiguredRoles(IdentityToken $identityToken): array
     {
         $roleIdentifiers = [];
@@ -262,14 +237,14 @@ final class OpenIdConnectProvider extends AbstractProvider
                 $mapping = null;
                 if (is_array($claim)) {
                     if (!array_key_exists('mapping', $claim)) {
-                        throw new \RuntimeException('If "rolesFromClaims" are specified as array, a "mapping" has to be provided', 1623421601);
+                        throw new RuntimeException('If "rolesFromClaims" are specified as array, a "mapping" has to be provided', 1623421601);
                     }
                     $mapping = $claim['mapping'];
                     if (!is_array($mapping)) {
-                        throw new \RuntimeException(sprintf('If "rolesFromClaims" are specified as array, a "mapping" has to be provided as array, given: %s', gettype($mapping)), 1623656982);
+                        throw new RuntimeException(sprintf('If "rolesFromClaims" are specified as array, a "mapping" has to be provided as array, given: %s', gettype($mapping)), 1623656982);
                     }
                     if (!array_key_exists('name', $claim)) {
-                        throw new \RuntimeException('If "rolesFromClaims" are specified as array, a "name" has to be provided', 1623421648);
+                        throw new RuntimeException('If "rolesFromClaims" are specified as array, a "name" has to be provided', 1623421648);
                     }
                     $claim = $claim['name'];
                 }
@@ -296,7 +271,6 @@ final class OpenIdConnectProvider extends AbstractProvider
                         $this->logger?->debug(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
                     }
                 }
-
             }
         }
         if (isset($this->options['addRolesFromExistingAccount']) && $this->options['addRolesFromExistingAccount'] === true) {

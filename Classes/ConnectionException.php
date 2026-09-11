@@ -2,6 +2,8 @@
 
 namespace Flownative\OpenIdConnect\Client;
 
-final class ConnectionException extends \Exception
+use Exception;
+
+final class ConnectionException extends Exception
 {
 }

@@ -2,6 +2,8 @@
 
 namespace Flownative\OpenIdConnect\Client;
 
-final class ServiceException extends \Exception
+use Exception;
+
+final class ServiceException extends Exception
 {
 }

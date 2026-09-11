@@ -2,6 +2,8 @@
 
 namespace Flownative\OpenIdConnect\Client;
 
-final class AuthenticationException extends \Exception
+use Exception;
+
+final class AuthenticationException extends Exception
 {
 }
