@@ -5,9 +5,11 @@ namespace Flownative\OpenIdConnect\Client\Authentication;
 use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OAuthClient;
-use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
+use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
+use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Mvc\ActionRequest;
+use Neos\Flow\Security\Cryptography\HashService;
 use Neos\Flow\Security\Authentication\Token\AbstractToken;
 use Neos\Flow\Security\Authentication\Token\SessionlessTokenInterface;
 use Neos\Flow\Security\Authentication\TokenInterface;
@@ -29,6 +31,20 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     protected string $authorizationHeader = '';
 
     protected string $refreshToken = '';
+
+    /**
+     * @var OpenIdConnectClientFactory
+     */
+    #[Flow\Inject]
+    protected $openIdConnectClientFactory;
+
+    /**
+     * Not lazy, because it is passed on as a typed argument and a lazy dependency proxy would not match the type.
+     *
+     * @var HashService
+     */
+    #[Flow\Inject(lazy: false)]
+    protected $hashService;
 
     /**
      * @throws InvalidAuthenticationStatusException
@@ -66,14 +82,14 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
                 throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', $authorizationIdQueryParameterName), 1560350311);
             }
             try {
-                $tokenArguments = TokenArguments::fromSignedString($this->queryParameters[self::OIDC_PARAMETER_NAME]);
+                $tokenArguments = TokenArguments::fromSignedString($this->queryParameters[self::OIDC_PARAMETER_NAME], $this->hashService);
             } catch (\InvalidArgumentException $exception) {
                 $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
                 throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
             }
 
             $authorizationIdentifier = $this->queryParameters[$authorizationIdQueryParameterName];
-            $client = new OpenIdConnectClient($tokenArguments[TokenArguments::SERVICE_NAME]);
+            $client = $this->openIdConnectClientFactory->create($tokenArguments[TokenArguments::SERVICE_NAME]);
 
             try {
                 $tokenSet = $client->getIdentityToken($authorizationIdentifier);

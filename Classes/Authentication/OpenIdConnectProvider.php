@@ -6,7 +6,7 @@ namespace Flownative\OpenIdConnect\Client\Authentication;
 use Flownative\OpenIdConnect\Client\AuthenticationException;
 use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
-use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
+use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Cache\Exception as CacheException;
 use Neos\Flow\Annotations as Flow;
@@ -59,6 +59,12 @@ final class OpenIdConnectProvider extends AbstractProvider
     protected $session;
 
     /**
+     * @var OpenIdConnectClientFactory
+     */
+    #[Flow\Inject]
+    protected $openIdConnectClientFactory;
+
+    /**
      * @return array
      */
     public function getTokenClassNames(): array
@@ -96,7 +102,7 @@ final class OpenIdConnectProvider extends AbstractProvider
             $this->options['jwtCookieName'] = 'flownative_oidc_jwt';
         }
         try {
-            $jwks = (new OpenIdConnectClient($this->options['serviceName']))->getJwks();
+            $jwks = $this->openIdConnectClientFactory->create($this->options['serviceName'])->getJwks();
             $identityToken = $authenticationToken->extractIdentityTokenFromRequest($this->options['jwtCookieName']);
 
             try {
@@ -149,7 +155,7 @@ final class OpenIdConnectProvider extends AbstractProvider
                     if ($refreshToken !== '') {
                         $this->logger->info(sprintf('OpenID Connect: The JWT "%s" is expired, trying to refresh with refresh token from session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
                         try {
-                            $tokenSet = (new OpenIdConnectClient($this->options['serviceName']))->refreshIdentityToken($identityToken, $refreshToken);
+                            $tokenSet = $this->openIdConnectClientFactory->create($this->options['serviceName'])->refreshIdentityToken($identityToken, $refreshToken);
                             $identityToken = $tokenSet->identityToken;
                             $refreshToken = $tokenSet->refreshToken;
                             if ($refreshToken !== '') {
