@@ -581,10 +581,15 @@ differently: if there's an account with the same username which is
 provided by the identity token, roles of that (persisted) account can be
 used.
 
-Given that the identity token provides a claim called "email" and that
-an account (for example, a Neos user account) exists using an email
-address as its account identifier, you may configure the provider as
-follows:
+Anyone who can present the identifier of an existing account receives
+its roles. Therefore, use a claim which is controlled by the identity
+provider and never changes for a user, ideally "sub". Claims like
+"email" or "preferred_username" can often be changed by the users
+themselves.
+
+Given that an account (for example, a Neos user account) exists using
+the subject of the identity provider as its account identifier, you may
+configure the provider as follows:
 
 ```
 …
@@ -595,16 +600,37 @@ follows:
                 label: 'OpenID Connect'
                 provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
                 providerOptions:
-                  accountIdentifierTokenValueName: 'email'
+                  accountIdentifierTokenValueName: 'sub'
                   addRolesFromExistingAccount: true
                   …
  
 ```
 
-When a user logs in and her identity token has a value "email"
-containing "alice@example.com", the OpenID Connect provider will
-automatically assign any roles which are assigned to a Flow account with
-the same account identifier.
+When a user logs in, the OpenID Connect provider will automatically
+assign any roles which are assigned to a Flow account with the same
+account identifier. The identifiers must match exactly, apart from upper
+and lower case.
+
+If you use "email" as account identifier, the provider only accepts
+tokens whose "email_verified" claim is true. Only disable this check
+with the "requireVerifiedEmail" option if your identity provider
+verifies all email addresses itself but doesn't send the claim:
+
+```
+…
+                providerOptions:
+                  accountIdentifierTokenValueName: 'email'
+                  requireVerifiedEmail: false
+                  …
+```
+
+Microsoft Entra ID is not such an identity provider. Its "email" claim
+is neither verified nor fixed, so use the "oid" or "sub" claim as
+account identifier instead.
+
+The check only applies to the "email" claim. If you use a custom claim
+containing an email address, for example one added by an Auth0 action,
+make sure that only verified addresses are written into it.
 
 You may mix "rolesFromClaims" with "addRolesFromExistingAccount". In
 that case roles from claims and existing accounts will be merged.
@@ -621,7 +647,8 @@ checks pass:
 - the token was issued by the issuer of the configured service ("iss")
 - the token was issued for the audience of your application ("aud")
 - the token is not expired ("exp") and already valid ("nbf", "iat")
-- the claim used as account identifier is present
+- the claim used as account identifier is present, and confirmed by
+  "email_verified" if it is the "email" claim
 
 Tokens which fail a check are rejected and the reason is written to the
 security log.

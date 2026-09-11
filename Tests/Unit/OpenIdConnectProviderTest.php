@@ -64,6 +64,7 @@ class OpenIdConnectProviderTest extends TestCase
             'missing service name' => [['roles' => ['Some.Package:User']], 1561480057],
             'negative leeway' => [['serviceName' => 'test', 'roles' => [], 'leeway' => -1], 1789122177],
             'leeway is not a number' => [['serviceName' => 'test', 'roles' => [], 'leeway' => '60'], 1789122177],
+            'requireVerifiedEmail is not a boolean' => [['serviceName' => 'test', 'roles' => [], 'requireVerifiedEmail' => 'no'], 1789126720],
         ];
     }
 
@@ -104,11 +105,98 @@ class OpenIdConnectProviderTest extends TestCase
     #[Test]
     public function authenticateUsesConfiguredClaimAsAccountIdentifier(): void
     {
-        $token = self::createTokenForBearerJwt(self::createJwt(['email' => 'alice@example.com']));
+        $token = self::createTokenForBearerJwt(self::createJwt(['email' => 'alice@example.com', 'email_verified' => true]));
 
         $this->createProvider(['roles' => ['Some.Package:User'], 'accountIdentifierTokenValueName' => 'email'])->authenticate($token);
 
         static::assertSame('alice@example.com', $token->getAccount()->getAccountIdentifier());
+    }
+
+    public static function emailVerifications(): array
+    {
+        return [
+            'verified' => [['email_verified' => true], [], TokenInterface::AUTHENTICATION_SUCCESSFUL],
+            'verified as string' => [['email_verified' => 'true'], [], TokenInterface::AUTHENTICATION_SUCCESSFUL],
+            'not verified' => [['email_verified' => false], [], TokenInterface::WRONG_CREDENTIALS],
+            'not verified as string' => [['email_verified' => 'false'], [], TokenInterface::WRONG_CREDENTIALS],
+            'verification as number' => [['email_verified' => 1], [], TokenInterface::WRONG_CREDENTIALS],
+            'verification missing' => [[], [], TokenInterface::WRONG_CREDENTIALS],
+            'verification not required' => [[], ['requireVerifiedEmail' => false], TokenInterface::AUTHENTICATION_SUCCESSFUL],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('emailVerifications')]
+    public function authenticateRequiresVerifiedEmailAddressAsAccountIdentifier(array $claims, array $options, int $expectedStatus): void
+    {
+        $token = self::createTokenForBearerJwt(self::createJwt(array_merge(['email' => 'alice@example.com'], $claims)));
+
+        $this->createProvider(array_merge(['roles' => ['Some.Package:User'], 'accountIdentifierTokenValueName' => 'email'], $options))->authenticate($token);
+
+        static::assertSame($expectedStatus, $token->getAuthenticationStatus());
+    }
+
+    public static function existingAccountIdentifiers(): array
+    {
+        return [
+            'same identifier' => ['admin@example.com', ['Some.Package:Administrator']],
+            'identifier in other case' => ['Admin@Example.com', ['Some.Package:Administrator']],
+            'identifier with accent' => ['ádmin@example.com', []],
+            'identifier with trailing space' => ['admin@example.com ', []],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('existingAccountIdentifiers')]
+    public function authenticateOnlyAddsRolesOfExistingAccountWithMatchingIdentifier(string $existingAccountIdentifier, array $expectedRoleIdentifiers): void
+    {
+        $existingAccount = new Account();
+        $existingAccount->setAccountIdentifier($existingAccountIdentifier);
+        $existingAccount->addRole(new Role('Some.Package:Administrator'));
+        // The repository stub mimics a database collation which considers all these identifiers equal.
+        $accountRepository = $this->createStub(AccountRepository::class);
+        $accountRepository->method('findActiveByAccountIdentifierAndAuthenticationProviderName')->willReturn($existingAccount);
+        $token = self::createTokenForBearerJwt(self::createJwt(['email' => 'admin@example.com', 'email_verified' => true]));
+
+        $this->createProvider(['addRolesFromExistingAccount' => true, 'accountIdentifierTokenValueName' => 'email'], accountRepository: $accountRepository)->authenticate($token);
+
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+        static::assertSame($expectedRoleIdentifiers, array_keys($token->getAccount()->getRoles()));
+    }
+
+    #[Test]
+    public function authenticateOnlyRequiresVerificationForEmailClaim(): void
+    {
+        $token = self::createTokenForBearerJwt(self::createJwt(['preferred_username' => 'alice@example.com']));
+
+        $this->createProvider(['roles' => ['Some.Package:User'], 'accountIdentifierTokenValueName' => 'preferred_username'])->authenticate($token);
+
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+    }
+
+    #[Test]
+    public function authenticateRejectsRefreshedTokenWithUnverifiedEmailAddress(): void
+    {
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => self::createJwt(['email' => 'alice@example.com', 'email_verified' => false])])));
+        $expiredJwt = self::createJwt(['email' => 'alice@example.com', 'email_verified' => true, 'exp' => time() - 600]);
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User'], 'accountIdentifierTokenValueName' => 'email'], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
+    }
+
+    #[Test]
+    public function authenticateDoesNotAddRolesOfExistingAccountForUnverifiedEmailAddress(): void
+    {
+        $accountRepository = $this->createMock(AccountRepository::class);
+        $accountRepository->expects($this->never())->method('findActiveByAccountIdentifierAndAuthenticationProviderName');
+        $token = self::createTokenForBearerJwt(self::createJwt(['email' => 'admin@example.com', 'email_verified' => false]));
+
+        $this->createProvider(['addRolesFromExistingAccount' => true, 'accountIdentifierTokenValueName' => 'email'], accountRepository: $accountRepository)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
     }
 
     public static function unusableAccountIdentifiers(): array
@@ -181,6 +269,7 @@ class OpenIdConnectProviderTest extends TestCase
     public function authenticateAddsRolesFromExistingAccount(): void
     {
         $existingAccount = new Account();
+        $existingAccount->setAccountIdentifier('alice');
         $existingAccount->addRole(new Role('Some.Package:Administrator'));
         $accountRepository = $this->createStub(AccountRepository::class);
         $accountRepository->method('findActiveByAccountIdentifierAndAuthenticationProviderName')->willReturnMap([['alice', 'SomeProvider', $existingAccount]]);

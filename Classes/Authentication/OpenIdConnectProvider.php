@@ -100,6 +100,10 @@ final class OpenIdConnectProvider extends AbstractProvider
             throw new RuntimeException('The "leeway" option in the configuration of OpenID Connect authentication provider must be zero or a positive number of seconds', 1789122177);
         }
         $leewayInterval = new DateInterval('PT' . $leeway . 'S');
+        $this->options['requireVerifiedEmail'] ??= true;
+        if (!is_bool($this->options['requireVerifiedEmail'])) {
+            throw new RuntimeException('The "requireVerifiedEmail" option in the configuration of OpenID Connect authentication provider must be a boolean', 1789126720);
+        }
 
         try {
             $identityToken = $authenticationToken->extractIdentityTokenFromRequest(CookieSettings::fromMiddlewareSettings($this->middlewareSettings)->getJwtCookieName($this->options));
@@ -346,6 +350,11 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (!is_string($accountIdentifier) || $accountIdentifier === '') {
             return sprintf('its claim "%s", which is used as account identifier, is missing or not a string', $this->options['accountIdentifierTokenValueName']);
         }
+
+        // Identity providers may let users choose an email address without verifying it, so it only identifies an account once it is verified.
+        if ($this->options['accountIdentifierTokenValueName'] === 'email' && $this->options['requireVerifiedEmail'] && !in_array($identityToken->values['email_verified'] ?? null, [true, 'true'], true)) {
+            return 'its email address, which is used as account identifier, is not verified';
+        }
         return null;
     }
 
@@ -494,13 +503,16 @@ final class OpenIdConnectProvider extends AbstractProvider
                 $this->logger?->error(sprintf('OpenID Connect: Failed using account identifier from identity token (%s) because the configured claim "%s" does not exist.', $subject, $this->options['accountIdentifierTokenValueName']), LogEnvironment::fromMethodName(__METHOD__));
             } else {
                 $existingAccount = $this->accountRepository->findActiveByAccountIdentifierAndAuthenticationProviderName($accountIdentifier, $this->name);
-                if ($existingAccount instanceof Account) {
+                if (!$existingAccount instanceof Account) {
+                    $this->logger?->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account %s (provider: %s) does not exist.', $subject, self::describeValue($accountIdentifier), $this->name), LogEnvironment::fromMethodName(__METHOD__));
+                } elseif (strcasecmp($existingAccount->getAccountIdentifier(), $accountIdentifier) !== 0) {
+                    // Depending on its collation, the database also finds identifiers which only look similar, for example with accents or trailing spaces.
+                    $this->logger?->notice(sprintf('OpenID Connect: Did not add roles of existing account %s for identity token (%s), because its account identifier differs from %s', self::describeValue($existingAccount->getAccountIdentifier()), $subject, self::describeValue($accountIdentifier)), LogEnvironment::fromMethodName(__METHOD__));
+                } else {
                     foreach ($existingAccount->getRoles() as $role) {
                         $roleIdentifiers[] = $role->getIdentifier();
                     }
                     $this->logger?->debug(sprintf('OpenID Connect: Added roles (identity token %s) from existing account %s', $subject, self::describeValue($existingAccount->getAccountIdentifier())), LogEnvironment::fromMethodName(__METHOD__));
-                } else {
-                    $this->logger?->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account %s (provider: %s) does not exist.', $subject, self::describeValue($accountIdentifier), $this->name), LogEnvironment::fromMethodName(__METHOD__));
                 }
             }
         }
