@@ -37,6 +37,11 @@
             "Flownative\\OpenIdConnect\\Client\\": "Classes"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Flownative\\OpenIdConnect\\Client\\Tests\\": "Tests"
+        }
+    },
     "scripts": {
         "test": "phpunit"
     },

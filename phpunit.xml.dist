@@ -8,7 +8,7 @@
          displayDetailsOnTestsThatTriggerWarnings="true"
          failOnDeprecation="true"
          failOnWarning="true">
-  <source>
+  <source ignoreIndirectDeprecations="true">
     <include>
       <directory suffix=".php">./Classes</directory>
     </include>
