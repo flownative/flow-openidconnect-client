@@ -38,8 +38,12 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         $this->validateOptions();
         $this->logger?->debug(sprintf('OpenID Connect: OpenIdConnectEntryPoint starting authentication for service "%s" ...', $this->options['serviceName']), LogEnvironment::fromMethodName(__METHOD__));
 
-        if ($this->hasAuthorizationHeader($request)) {
-            $this->logger?->debug('OpenID Connect: OpenIdConnectEntryPoint detected "Authorization" header', LogEnvironment::fromMethodName(__METHOD__));
+        if (!$this->isNavigation($request)) {
+            $this->logger?->debug('OpenID Connect: OpenIdConnectEntryPoint answers with status 401, because the request does not come from a browser which navigates to a page', LogEnvironment::fromMethodName(__METHOD__));
+            return $response
+                ->withStatus(401)
+                ->withHeader('WWW-Authenticate', 'Bearer')
+                ->withHeader('Cache-Control', 'no-store');
         }
 
         $nonce = Nonce::generate();
@@ -91,18 +95,18 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         }
     }
 
-    private function hasAuthorizationHeader(ServerRequestInterface $request): bool
+    /**
+     * Tells if a browser navigates to a page with this request. Only then it can follow the redirect to the identity provider and come
+     * back with the login. Scripts and API clients would receive a redirect which they can't use.
+     */
+    private function isNavigation(ServerRequestInterface $request): bool
     {
-        $authorizationHeader = null;
-        if ($request->hasHeader('Authorization')) {
-            $authorizationHeader = $request->getHeader('Authorization');
-        } elseif ($request->hasHeader('authorization')) {
-            $authorizationHeader = $request->getHeader('Authorization');
+        // Only a bearer token counts, because browsers also send "Basic" credentials, for example for a staging site behind a password
+        if (stripos($request->getHeaderLine('Authorization'), 'Bearer ') === 0 || $request->getHeaderLine('X-Requested-With') === 'XMLHttpRequest') {
+            return false;
         }
-
-        if (is_array($authorizationHeader)) {
-            $authorizationHeader = reset($authorizationHeader);
-        }
-        return $authorizationHeader !== null;
+        // Browsers which don't send this header are expected to navigate
+        $fetchMode = $request->getHeaderLine('Sec-Fetch-Mode');
+        return $fetchMode === '' || $fetchMode === 'navigate';
     }
 }

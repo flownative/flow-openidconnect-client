@@ -69,6 +69,56 @@ class OpenIdConnectEntryPointTest extends TestCase
         static::assertSame('no-store', $response->getHeaderLine('Cache-Control'));
     }
 
+    public static function requestsWhichDoNotNavigate(): array
+    {
+        return [
+            'bearer token' => [['Authorization' => 'Bearer some-token']],
+            'XMLHttpRequest' => [['X-Requested-With' => 'XMLHttpRequest']],
+            'fetch in CORS mode' => [['Sec-Fetch-Mode' => 'cors']],
+            'fetch in same-origin mode' => [['Sec-Fetch-Mode' => 'same-origin']],
+            'image or script' => [['Sec-Fetch-Mode' => 'no-cors']],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('requestsWhichDoNotNavigate')]
+    public function startAuthenticationAnswersWithStatus401IfRequestDoesNotNavigate(array $headers): void
+    {
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->expects($this->never())->method('startAuthorization');
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test']);
+
+        $response = $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/api', $headers), new Response());
+
+        static::assertSame(401, $response->getStatusCode());
+        static::assertSame('Bearer', $response->getHeaderLine('WWW-Authenticate'));
+        static::assertSame('no-store', $response->getHeaderLine('Cache-Control'));
+        static::assertFalse($response->hasHeader('Set-Cookie'));
+    }
+
+    public static function requestsWhichNavigate(): array
+    {
+        return [
+            'navigation' => [['Sec-Fetch-Mode' => 'navigate']],
+            'browser without fetch metadata' => [[]],
+            'navigation with basic authentication' => [['Sec-Fetch-Mode' => 'navigate', 'Authorization' => 'Basic dXNlcjpwYXNzd29yZA==']],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('requestsWhichNavigate')]
+    public function startAuthenticationRedirectsIfRequestNavigates(array $headers): void
+    {
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturn(new Uri(self::AUTHORIZATION_URI));
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test']);
+
+        $response = $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure', $headers), new Response());
+
+        static::assertSame(303, $response->getStatusCode());
+        static::assertSame(self::AUTHORIZATION_URI, $response->getHeaderLine('Location'));
+    }
+
     #[Test]
     public function startAuthenticationBindsAuthorizationToBrowserWithNonceCookie(): void
     {
