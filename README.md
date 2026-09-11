@@ -18,6 +18,9 @@ JWTs are easy to handle in client- and server-side applications. The
 data contained in the ID token is usually signed and can optionally be
 encrypted.
 
+Upgrading from version 5? Read the
+[migration guide](Documentation/Migration-6.0.md).
+
 ## Feature Overview
 
 This plugin acts as a Flow authentication provider. It allows you to
