@@ -6,6 +6,7 @@ namespace Flownative\OpenIdConnect\Client\Authentication;
 use DateInterval;
 use DateTimeImmutable;
 use Flownative\OpenIdConnect\Client\ConnectionException;
+use Flownative\OpenIdConnect\Client\CookieSettings;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
@@ -61,6 +62,9 @@ final class OpenIdConnectProvider extends AbstractProvider
     #[Flow\Inject]
     protected OpenIdConnectClientFactory $openIdConnectClientFactory;
 
+    #[Flow\InjectConfiguration(path: 'middleware')]
+    protected array $middlewareSettings = [];
+
     public function getTokenClassNames(): array
     {
         return [OpenIdConnectToken::class];
@@ -87,9 +91,6 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (!isset($this->options['accountIdentifierTokenValueName'])) {
             $this->options['accountIdentifierTokenValueName'] = 'sub';
         }
-        if (!isset($this->options['jwtCookieName'])) {
-            $this->options['jwtCookieName'] = 'flownative_oidc_jwt';
-        }
         $leeway = $this->options['leeway'] ?? self::DEFAULT_LEEWAY;
         if (!is_int($leeway) || $leeway < 0) {
             throw new RuntimeException('The "leeway" option in the configuration of OpenID Connect authentication provider must be zero or a positive number of seconds', 1789122177);
@@ -97,7 +98,7 @@ final class OpenIdConnectProvider extends AbstractProvider
         $leewayInterval = new DateInterval('PT' . $leeway . 'S');
 
         try {
-            $identityToken = $authenticationToken->extractIdentityTokenFromRequest($this->options['jwtCookieName']);
+            $identityToken = $authenticationToken->extractIdentityTokenFromRequest(CookieSettings::fromMiddlewareSettings($this->middlewareSettings)->getJwtCookieName($this->options));
         } catch (AuthenticationRequiredException) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
             return;

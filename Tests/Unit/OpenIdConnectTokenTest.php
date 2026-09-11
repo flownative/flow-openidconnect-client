@@ -205,6 +205,22 @@ class OpenIdConnectTokenTest extends TestCase
         static::assertSame(array_key_first($nonceCookies), $token->getNonceCookieName());
     }
 
+    #[Test]
+    public function extractIdentityTokenFromRequestAcceptsNonceCookieWithoutHostPrefixIfCookiesAreInsecure(): void
+    {
+        $hashService = OpenIdConnectClientFixture::createHashService();
+        $nonce = Nonce::generate();
+        $nonceCookies = self::createNonceCookies($nonce, false);
+        $jwt = self::createUnsignedJwt(['sub' => 'returning-subject', 'nonce' => $nonce->value]);
+
+        $token = $this->createTokenWithClient($this->createOAuthClientForFinishedAuthorization($jwt), $hashService);
+        OpenIdConnectClientFixture::inject($token, 'middlewareSettings', ['cookie' => ['secure' => false]]);
+        $token->updateCredentials(self::createActionRequest(cookies: $nonceCookies, queryParameters: self::createReturnQueryParameters($hashService, $nonce->value)));
+
+        static::assertSame($jwt, $token->extractIdentityTokenFromRequest(self::COOKIE_NAME)->asJwt());
+        static::assertSame(array_key_first($nonceCookies), $token->getNonceCookieName());
+    }
+
     public static function identityTokensWithoutNonce(): array
     {
         return [
@@ -242,6 +258,7 @@ class OpenIdConnectTokenTest extends TestCase
             'nonce cookie is missing' => [$nonce->value, $nonce->value, []],
             'nonce cookie of another login' => [$nonce->value, $nonce->value, self::createNonceCookies($otherNonce)],
             'nonce cookie with another secret' => [$nonce->value, $nonce->value, [array_key_first($nonceCookies) => str_repeat('0', 64)]],
+            'nonce cookie without host prefix' => [$nonce->value, $nonce->value, self::createNonceCookies($nonce, false)],
             'only a valid JWT cookie' => [$nonce->value, $nonce->value, [self::COOKIE_NAME => self::createUnsignedJwt(['sub' => 'cookie-subject'])]],
             'nonce of another authorization' => [$otherNonce->value, $nonce->value, $nonceCookies],
             'authorization without nonce' => [null, $nonce->value, $nonceCookies],
@@ -364,9 +381,9 @@ class OpenIdConnectTokenTest extends TestCase
         return $oAuthClient;
     }
 
-    private static function createNonceCookies(Nonce $nonce): array
+    private static function createNonceCookies(Nonce $nonce, bool $secure = true): array
     {
-        $cookie = $nonce->createCookie(true);
+        $cookie = $nonce->createCookie(CookieSettings::fromMiddlewareSettings(['cookie' => ['secure' => $secure]]));
         return [$cookie->getName() => $cookie->getValue()];
     }
 

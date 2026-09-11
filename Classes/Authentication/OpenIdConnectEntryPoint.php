@@ -4,6 +4,7 @@ namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Flownative\OAuth2\Client\OAuthClientException;
 use Flownative\OpenIdConnect\Client\ConfigurationException;
+use Flownative\OpenIdConnect\Client\CookieSettings;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Annotations as Flow;
@@ -65,18 +66,17 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
             ->withHeader('Location', (string)$providerUri)
             ->withHeader('Cache-Control', 'no-store');
 
-        // The deprecated option "secureCookie" overrides "cookie.secure", as in SetJwtCookieMiddleware
-        $cookieSecure = $this->middlewareSettings['secureCookie'] ?? $this->middlewareSettings['cookie']['secure'] ?? true;
+        $cookieSettings = CookieSettings::fromMiddlewareSettings($this->middlewareSettings);
 
-        // Requests which fail authentication repeatedly, like XHR requests with an expired token, start a new login each time. Without a
-        // limit, their cookies would soon exceed the size of request headers which web servers accept.
-        $pendingNonceCookieNames = Nonce::findCookieNames($request->getCookieParams());
+        // Each login in progress keeps a cookie until it expires. Without a limit, repeated logins, for example after rejected returns,
+        // would soon exceed the size of request headers which web servers accept.
+        $pendingNonceCookieNames = Nonce::findCookieNames($request->getCookieParams(), $cookieSettings);
         if (count($pendingNonceCookieNames) >= self::MAXIMUM_PENDING_LOGINS) {
             foreach ($pendingNonceCookieNames as $cookieName) {
-                $response = $response->withAddedHeader('Set-Cookie', (string)Nonce::createRemovalCookie($cookieName, $cookieSecure));
+                $response = $response->withAddedHeader('Set-Cookie', (string)Nonce::createRemovalCookie($cookieName, $cookieSettings));
             }
         }
-        return $response->withAddedHeader('Set-Cookie', (string)$nonce->createCookie($cookieSecure));
+        return $response->withAddedHeader('Set-Cookie', (string)$nonce->createCookie($cookieSettings));
     }
 
     /**

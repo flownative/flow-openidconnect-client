@@ -299,7 +299,7 @@ the OIDC identity provider.
 
 Before the entry point redirects the browser to the identity provider,
 it stores a random secret in a cookie named
-"flownative_oidc_nonce_…". The identity provider receives a hash of
+"__Host-flownative_oidc_nonce_…". The identity provider receives a hash of
 this secret as "nonce" and copies it into the identity token. When the
 browser returns, the token is only accepted if the browser has the
 matching cookie. A login which was started in another browser is
@@ -317,10 +317,12 @@ response which redirects the browser. This response must not be
 cached, because the cookie contains the secret:
 
 ```php
+// $this->middlewareSettings is injected with
+// #[Flow\InjectConfiguration(path: 'middleware', package: 'Flownative.OpenIdConnect.Client')]
+$cookieSettings = CookieSettings::fromMiddlewareSettings($this->middlewareSettings);
 $nonce = Nonce::generate();
 $uri = $client->startAuthorization($returnToUri, 'profile email', $nonce);
-// Pass false only for testing without HTTPS
-$this->response->setCookie($nonce->createCookie(true));
+$this->response->setCookie($nonce->createCookie($cookieSettings));
 $this->response->setHttpHeader('Cache-Control', 'no-store');
 $this->redirectToUri($uri);
 ```
@@ -331,6 +333,14 @@ After a successful login, the middleware stores the identity token in a
 cookie, so that the browser sends it with the following requests. By
 default, the cookie is only sent over HTTPS ("secure") and cannot be
 read by JavaScript ("httpOnly").
+
+With "secure" enabled, the cookie is named "__Host-flownative_oidc_jwt".
+Browsers only accept a cookie with this prefix if the site itself sets
+it over HTTPS, so that another subdomain can't plant a cookie with a
+login of its own. A name configured with "jwtCookieName" or
+"cookie.name" is used as it is, so consider giving it the same prefix.
+Flow's session cookie can get the prefix as well, through the settings
+"Neos.Flow.session.name" and "Neos.Flow.session.cookie".
 
 The middleware renews the cookie with every response to a logged-in
 user. These responses are marked as private, so that shared caches

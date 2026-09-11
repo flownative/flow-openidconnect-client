@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
+use Flownative\OpenIdConnect\Client\CookieSettings;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\Cookie;
 
@@ -33,39 +34,40 @@ final readonly class Nonce
     /**
      * Tells if the given cookies contain the secret of a nonce value, as found in an identity token
      */
-    public static function isBoundToCookies(string $value, array $cookies): bool
+    public static function isBoundToCookies(string $value, array $cookies, CookieSettings $cookieSettings): bool
     {
-        $secret = $cookies[self::getCookieNameForValue($value)] ?? null;
+        $secret = $cookies[self::getCookieNameForValue($value, $cookieSettings)] ?? null;
         return is_string($secret) && hash_equals(hash('sha256', $secret), $value);
     }
 
     /**
      * Each login gets its own cookie, so that logins started in parallel, for example in two tabs, don't replace each other's secret
      */
-    public static function getCookieNameForValue(string $value): string
+    public static function getCookieNameForValue(string $value, CookieSettings $cookieSettings): string
     {
-        return self::COOKIE_NAME_PREFIX . substr($value, 0, 16);
+        return $cookieSettings->withHostPrefix(self::COOKIE_NAME_PREFIX . substr($value, 0, 16));
     }
 
     /**
      * Returns the names of the nonce cookies in the given cookies, which belong to logins in progress
      */
-    public static function findCookieNames(array $cookies): array
+    public static function findCookieNames(array $cookies, CookieSettings $cookieSettings): array
     {
+        $pattern = '/^' . preg_quote($cookieSettings->withHostPrefix(self::COOKIE_NAME_PREFIX), '/') . '[0-9a-f]{16}\z/';
         return array_values(array_filter(
             array_map('strval', array_keys($cookies)),
-            static fn (string $cookieName): bool => preg_match('/^' . self::COOKIE_NAME_PREFIX . '[0-9a-f]{16}\z/', $cookieName) === 1
+            static fn (string $cookieName): bool => preg_match($pattern, $cookieName) === 1
         ));
     }
 
-    public function createCookie(bool $secure): Cookie
+    public function createCookie(CookieSettings $cookieSettings): Cookie
     {
         // A "strict" cookie would not be sent when the identity provider redirects the browser back
-        return new Cookie(self::getCookieNameForValue($this->value), $this->secret, 0, self::COOKIE_LIFETIME, null, '/', $secure, true, Cookie::SAMESITE_LAX);
+        return new Cookie(self::getCookieNameForValue($this->value, $cookieSettings), $this->secret, 0, self::COOKIE_LIFETIME, null, '/', $cookieSettings->secure, true, Cookie::SAMESITE_LAX);
     }
 
-    public static function createRemovalCookie(string $cookieName, bool $secure): Cookie
+    public static function createRemovalCookie(string $cookieName, CookieSettings $cookieSettings): Cookie
     {
-        return new Cookie($cookieName, '', 1, null, null, '/', $secure, true, Cookie::SAMESITE_LAX);
+        return new Cookie($cookieName, '', 1, null, null, '/', $cookieSettings->secure, true, Cookie::SAMESITE_LAX);
     }
 }

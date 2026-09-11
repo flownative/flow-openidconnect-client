@@ -4,6 +4,7 @@ namespace Flownative\OpenIdConnect\Client\Http;
 
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
+use Flownative\OpenIdConnect\Client\CookieSettings;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OAuthClient;
 use GuzzleHttp\Psr7\Query;
@@ -50,9 +51,7 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
             return $response;
         }
 
-        $cookieSecure = $this->options['cookie']['secure'] ?? true;
-        $cookieHttpOnly = $this->options['cookie']['httpOnly'] ?? true;
-        $cookieSameSite = $this->options['cookie']['sameSite'] ?? Cookie::SAMESITE_LAX;
+        $cookieSettings = CookieSettings::fromMiddlewareSettings($this->options);
 
         foreach ($this->securityContext->getAuthenticationTokensOfType(OpenIdConnectToken::class) as $token) {
             // Requests with a bearer token don't touch the cookie. Setting it would make the browser send the token automatically, and
@@ -61,16 +60,16 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
                 continue;
             }
             if ($token->getNonceCookieName() !== '') {
-                $response = $response->withAddedHeader('Set-Cookie', (string)Nonce::createRemovalCookie($token->getNonceCookieName(), $cookieSecure));
+                $response = $response->withAddedHeader('Set-Cookie', (string)Nonce::createRemovalCookie($token->getNonceCookieName(), $cookieSettings));
             }
             $providerName = $token->getAuthenticationProviderName();
             $providerOptions = $this->authenticationProviderConfiguration[$token->getAuthenticationProviderName()]['providerOptions'] ?? [];
             $account = $this->securityContext->getAccountByAuthenticationProviderName($providerName);
-            $cookieName = $providerOptions['jwtCookieName'] ?? $this->options['cookie']['name'] ?? 'flownative_oidc_jwt';
+            $cookieName = $cookieSettings->getJwtCookieName($providerOptions);
             if ($account === null) {
                 if (isset($request->getCookieParams()[$cookieName])) {
                     $this->logger->debug(sprintf('OpenID Connect: No account is authenticated using the provider %s, removing JWT cookie "%s".', $providerName, $cookieName), LogEnvironment::fromMethodName(__METHOD__));
-                    $response = $this->withoutSharedCaching($this->removeJwtCookie($response, $cookieName, $cookieSecure, $cookieHttpOnly, $cookieSameSite));
+                    $response = $this->withoutSharedCaching($this->removeJwtCookie($response, $cookieName, $cookieSettings));
                 }
                 continue;
             }
@@ -81,7 +80,7 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
                 continue;
             }
 
-            $response = $this->withoutSharedCaching($this->setJwtCookie($response, $cookieName, $cookieSecure, $cookieHttpOnly, $cookieSameSite, $identityToken->asJwt()));
+            $response = $this->withoutSharedCaching($this->setJwtCookie($response, $cookieName, $cookieSettings, $identityToken->asJwt()));
         }
 
         // Note: A redirect with a Location header only works if the JWT cookie has a "lax" Same Site configuration. If Same Site of the
@@ -89,16 +88,16 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
         //
         // See also https://bugzilla.mozilla.org/show_bug.cgi?id=1465402
         // and https://web.dev/samesite-cookies-explained/
-        if ($cookieSameSite !== Cookie::SAMESITE_STRICT && !$response->hasHeader('Location')) {
+        if ($cookieSettings->sameSite !== Cookie::SAMESITE_STRICT && !$response->hasHeader('Location')) {
             return $this->withRedirectToRemoveOidcQueryParameters($request, $response);
         }
 
         return $response;
     }
 
-    private function setJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, bool $httpOnly, string $sameSite, string $jwt): ResponseInterface
+    private function setJwtCookie(ResponseInterface $response, string $cookieName, CookieSettings $cookieSettings, string $jwt): ResponseInterface
     {
-        $jwtCookie = new Cookie($cookieName, $jwt, 0, null, null, '/', $secure, $httpOnly, $sameSite);
+        $jwtCookie = new Cookie($cookieName, $jwt, 0, null, null, '/', $cookieSettings->secure, $cookieSettings->httpOnly, $cookieSettings->sameSite);
         return $response->withAddedHeader('Set-Cookie', (string)$jwtCookie);
     }
 
@@ -124,9 +123,9 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
             ->withoutHeader('Surrogate-Control');
     }
 
-    private function removeJwtCookie(ResponseInterface $response, string $cookieName, bool $secure, bool $httpOnly, string $sameSite): ResponseInterface
+    private function removeJwtCookie(ResponseInterface $response, string $cookieName, CookieSettings $cookieSettings): ResponseInterface
     {
-        $emptyJwtCookie = new Cookie($cookieName, '', 1, null, null, '/', $secure, $httpOnly, $sameSite);
+        $emptyJwtCookie = new Cookie($cookieName, '', 1, null, null, '/', $cookieSettings->secure, $cookieSettings->httpOnly, $cookieSettings->sameSite);
         return $response->withAddedHeader('Set-Cookie', (string)$emptyJwtCookie);
     }
 

@@ -23,7 +23,7 @@ Flownative:
 #            providerOptions:
 #              roles: ['Acme.MyPackage:User']
 #              accountIdentifierTokenValueName: 'inum'
-#              jwtCookieName: 'your-own-cookie-name-jwt'
+#              jwtCookieName: '__Host-your-own-cookie-name-jwt'
 #              serviceName: 'exampleService'
 #            token: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken'
 #            requestPatterns:

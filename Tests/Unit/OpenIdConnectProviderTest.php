@@ -482,6 +482,30 @@ class OpenIdConnectProviderTest extends TestCase
         static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
     }
 
+    public static function jwtCookieNames(): array
+    {
+        return [
+            'default name with host prefix' => [[], [], '__Host-flownative_oidc_jwt'],
+            'default name without host prefix for insecure cookies' => [[], ['cookie' => ['secure' => false]], 'flownative_oidc_jwt'],
+            'name configured for the middleware' => [[], ['cookie' => ['name' => 'middleware_jwt']], 'middleware_jwt'],
+            'name configured for the provider' => [['jwtCookieName' => 'provider_jwt'], ['cookie' => ['name' => 'middleware_jwt']], 'provider_jwt'],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('jwtCookieNames')]
+    public function authenticateReadsIdentityTokenFromConfiguredJwtCookie(array $providerOptions, array $middlewareSettings, string $cookieName): void
+    {
+        $token = new OpenIdConnectToken();
+        $token->updateCredentials(ActionRequest::fromHttpRequest((new ServerRequest('GET', 'https://www.example.com/'))->withCookieParams([$cookieName => self::createJwt()])));
+        $provider = $this->createProvider(array_merge(['roles' => ['Some.Package:User']], $providerOptions));
+        OpenIdConnectClientFixture::inject($provider, 'middlewareSettings', $middlewareSettings);
+
+        $provider->authenticate($token);
+
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+    }
+
     private function createProvider(
         array $options,
         ?SessionInterface $session = null,

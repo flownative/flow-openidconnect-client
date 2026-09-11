@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Flownative\OpenIdConnect\Client\ConnectionException;
+use Flownative\OpenIdConnect\Client\CookieSettings;
 use Flownative\OpenIdConnect\Client\IdentityToken;
 use Flownative\OpenIdConnect\Client\OAuthClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
@@ -42,6 +43,9 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
     #[Flow\Inject]
     protected HashService $hashService;
+
+    #[Flow\InjectConfiguration(path: 'middleware')]
+    protected array $middlewareSettings = [];
 
     /**
      * @throws InvalidAuthenticationStatusException
@@ -109,13 +113,14 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
             }
             // The nonce must be the one of this authorization, and its secret must be in this browser
             $expectedNonce = $tokenArguments[TokenArguments::NONCE];
-            if (!is_string($expectedNonce) || !hash_equals($expectedNonce, $nonce) || !Nonce::isBoundToCookies($nonce, $this->cookies)) {
+            $cookieSettings = CookieSettings::fromMiddlewareSettings($this->middlewareSettings);
+            if (!is_string($expectedNonce) || !hash_equals($expectedNonce, $nonce) || !Nonce::isBoundToCookies($nonce, $this->cookies, $cookieSettings)) {
                 $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
                 throw new AccessDeniedException('The finished authorization was not started in this browser', 1789131856);
             }
             $identityToken = $tokenSet->identityToken;
             $this->refreshToken = $tokenSet->refreshToken;
-            $this->nonceCookieName = Nonce::getCookieNameForValue($nonce);
+            $this->nonceCookieName = Nonce::getCookieNameForValue($nonce, $cookieSettings);
         } else {
             $identityToken = $this->extractIdentityTokenFromCookie($cookieName);
         }

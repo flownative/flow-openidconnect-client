@@ -134,9 +134,9 @@ class OpenIdConnectEntryPointTest extends TestCase
 
         $response = $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure'), new Response());
 
-        static::assertMatchesRegularExpression('/^(flownative_oidc_nonce_[0-9a-f]{16})=([0-9a-f]{64}); Max-Age=3600; Path=\/; Secure; HttpOnly; SameSite=lax$/', $response->getHeaderLine('Set-Cookie'));
+        static::assertMatchesRegularExpression('/^(__Host-flownative_oidc_nonce_[0-9a-f]{16})=([0-9a-f]{64}); Max-Age=3600; Path=\/; Secure; HttpOnly; SameSite=lax$/', $response->getHeaderLine('Set-Cookie'));
         preg_match('/^([^=]+)=([^;]+);/', $response->getHeaderLine('Set-Cookie'), $matches);
-        static::assertTrue(Nonce::isBoundToCookies($authorizationParameters['nonce'], [$matches[1] => $matches[2]]));
+        static::assertTrue(Nonce::isBoundToCookies($authorizationParameters['nonce'], [$matches[1] => $matches[2]], CookieSettings::fromMiddlewareSettings([])));
     }
 
     public static function insecureCookieSettings(): array
@@ -158,6 +158,7 @@ class OpenIdConnectEntryPointTest extends TestCase
 
         $response = $entryPoint->startAuthentication(new ServerRequest('GET', 'http://localhost/secure'), new Response());
 
+        static::assertStringStartsWith('flownative_oidc_nonce_', $response->getHeaderLine('Set-Cookie'));
         static::assertStringEndsWith('; Max-Age=3600; Path=/; HttpOnly; SameSite=lax', $response->getHeaderLine('Set-Cookie'));
     }
 
@@ -225,7 +226,7 @@ class OpenIdConnectEntryPointTest extends TestCase
     {
         $cookies = ['flownative_oidc_jwt' => 'unrelated'];
         for ($i = 0; $i < $numberOfPendingLogins; $i++) {
-            $cookie = Nonce::generate()->createCookie(true);
+            $cookie = Nonce::generate()->createCookie(CookieSettings::fromMiddlewareSettings([]));
             $cookies[$cookie->getName()] = $cookie->getValue();
         }
         $oAuthClient = $this->createStub(OAuthClient::class);
