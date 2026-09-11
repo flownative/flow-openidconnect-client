@@ -25,9 +25,9 @@ class OAuthClient extends \Flownative\OAuth2\Client\OAuthClient
     public const SERVICE_TYPE= 'oidc';
 
     /**
-     * @Flow\InjectConfiguration(path="http.baseUri", package="Neos.Flow")
      * @var string
      */
+    #[Flow\InjectConfiguration(path: 'http.baseUri', package: 'Neos.Flow')]
     protected $flowBaseUriSetting;
 
     private array $options = [];
