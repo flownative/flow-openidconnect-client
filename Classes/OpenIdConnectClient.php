@@ -16,6 +16,7 @@ use Neos\Cache\Exception as CacheException;
 use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Log\Utility\LogEnvironment;
+use Neos\Flow\Security\Cryptography\HashService;
 use Neos\Utility\Arrays;
 use Psr\Http\Message\UriInterface;
 use Psr\Log\LoggerInterface;
@@ -59,6 +60,14 @@ final class OpenIdConnectClient
      */
     #[Flow\Inject(name: 'Neos.Flow:SecurityLogger')]
     protected $logger;
+
+    /**
+     * Not lazy, because it is passed on as a typed argument and a lazy dependency proxy would not match the type.
+     *
+     * @var HashService
+     */
+    #[Flow\Inject(lazy: false)]
+    protected $hashService;
 
     /**
      * @var VariableFrontend
@@ -213,7 +222,7 @@ final class OpenIdConnectClient
      */
     public function startAuthorization(UriInterface $returnToUri, string $scope, bool $requestRefreshToken = true): UriInterface
     {
-        $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $this->serviceName]);
+        $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $this->serviceName], $this->hashService);
         if (str_starts_with($returnArguments, 'ERROR')) {
             throw new \RuntimeException(substr($returnArguments, 6));
         }

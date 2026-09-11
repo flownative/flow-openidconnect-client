@@ -4,7 +4,7 @@ namespace Flownative\OpenIdConnect\Client\Authentication;
 
 use Flownative\OAuth2\Client\OAuthClientException;
 use Flownative\OpenIdConnect\Client\ConfigurationException;
-use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
+use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\ContentStream;
@@ -23,6 +23,12 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
     protected $logger;
 
     /**
+     * @var OpenIdConnectClientFactory
+     */
+    #[Flow\Inject]
+    protected $openIdConnectClientFactory;
+
+    /**
      * @throws ConfigurationException
      */
     public function startAuthentication(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
@@ -34,7 +40,7 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
             $this->logger->debug('OpenID Connect: OpenIdConnectEntryPoint detected "Authorization" header', LogEnvironment::fromMethodName(__METHOD__));
         }
 
-        $client = new OpenIdConnectClient($this->options['serviceName']);
+        $client = $this->openIdConnectClientFactory->create($this->options['serviceName']);
         try {
             $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '', $this->options['requestRefreshToken'] ?? true);
         } catch (OAuthClientException | ServiceException $exception) {
