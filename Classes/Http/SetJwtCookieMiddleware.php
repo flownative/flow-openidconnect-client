@@ -18,32 +18,12 @@ use Psr\Log\LoggerInterface;
 
 final class SetJwtCookieMiddleware implements MiddlewareInterface
 {
-    /**
-     * @var SecurityContext
-     */
-    private $securityContext;
-
-    /**
-     * @var LoggerInterface
-     */
-    private $logger;
-
-    /**
-     * @var array
-     */
-    private $options;
-
-    /**
-     * @var array
-     */
-    private $authenticationProviderConfiguration;
-
-    public function __construct(array $options, array $authenticationProviderConfiguration, SecurityContext $securityContext, LoggerInterface $logger)
-    {
-        $this->options = $options;
-        $this->authenticationProviderConfiguration = $authenticationProviderConfiguration;
-        $this->securityContext = $securityContext;
-        $this->logger = $logger;
+    public function __construct(
+        private array $options,
+        private readonly array $authenticationProviderConfiguration,
+        private readonly SecurityContext $securityContext,
+        private readonly LoggerInterface $logger,
+    ) {
     }
 
     /**

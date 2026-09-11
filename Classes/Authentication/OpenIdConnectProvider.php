@@ -28,41 +28,26 @@ use Psr\Log\LoggerInterface;
 
 final class OpenIdConnectProvider extends AbstractProvider
 {
-    /**
-     * @var Context
-     */
-    #[Flow\Inject(lazy: false)]
-    protected $securityContext;
-
-    /**
-     * @var PolicyService
-     */
-    #[Flow\Inject(lazy: false)]
-    protected $policyService;
-
-    /**
-     * @var LoggerInterface
-     */
-    #[Flow\Inject(name: 'Neos.Flow:SecurityLogger')]
-    protected $logger;
-
-    /**
-     * @var AccountRepository
-     */
     #[Flow\Inject]
-    protected $accountRepository;
+    protected Context $securityContext;
+
+    #[Flow\Inject]
+    protected PolicyService $policyService;
 
     /**
-     * @var SessionInterface
+     * Not lazy, because a named injection would otherwise receive a dependency proxy which does not match the type.
      */
-    #[Flow\Inject]
-    protected $session;
+    #[Flow\Inject(name: 'Neos.Flow:SecurityLogger', lazy: false)]
+    protected ?LoggerInterface $logger = null;
 
-    /**
-     * @var OpenIdConnectClientFactory
-     */
     #[Flow\Inject]
-    protected $openIdConnectClientFactory;
+    protected AccountRepository $accountRepository;
+
+    #[Flow\Inject]
+    protected SessionInterface $session;
+
+    #[Flow\Inject]
+    protected OpenIdConnectClientFactory $openIdConnectClientFactory;
 
     /**
      * @return array
@@ -124,13 +109,13 @@ final class OpenIdConnectProvider extends AbstractProvider
                 }
 
                 if ($this->session->isStarted()) {
-                    $this->logger->debug('OpenID Connect: Set refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
+                    $this->logger?->debug('OpenID Connect: Set refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
                     $this->session->putData('flownative_oidc_refresh', $refreshToken);
                 } else {
-                    $this->logger->debug('OpenID Connect: Could not store refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
+                    $this->logger?->debug('OpenID Connect: Could not store refresh token in session', LogEnvironment::fromMethodName(__METHOD__));
                 }
             }
-            $this->logger->debug(sprintf('OpenID Connect: Successfully verified signature of identity token with %s value "%s"', $this->options['accountIdentifierTokenValueName'], $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? 'unknown'), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->debug(sprintf('OpenID Connect: Successfully verified signature of identity token with %s value "%s"', $this->options['accountIdentifierTokenValueName'], $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? 'unknown'), LogEnvironment::fromMethodName(__METHOD__));
         } catch (SecurityException\AuthenticationRequiredException) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
             return;
@@ -138,7 +123,7 @@ final class OpenIdConnectProvider extends AbstractProvider
             if ($authenticationToken->getAuthenticationStatus() === TokenInterface::AUTHENTICATION_SUCCESSFUL) {
                 $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
             }
-            $this->logger->notice(sprintf('OpenID Connect: The authentication provider caught an exception: %s', $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->notice(sprintf('OpenID Connect: The authentication provider caught an exception: %s', $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return;
         }
 
@@ -153,22 +138,22 @@ final class OpenIdConnectProvider extends AbstractProvider
                 if ($this->session->isStarted()) {
                     $refreshToken = (string)$this->session->getData('flownative_oidc_refresh');
                     if ($refreshToken !== '') {
-                        $this->logger->info(sprintf('OpenID Connect: The JWT "%s" is expired, trying to refresh with refresh token from session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
+                        $this->logger?->info(sprintf('OpenID Connect: The JWT "%s" is expired, trying to refresh with refresh token from session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
                         try {
                             $tokenSet = $this->openIdConnectClientFactory->create($this->options['serviceName'])->refreshIdentityToken($identityToken, $refreshToken);
                             $identityToken = $tokenSet->identityToken;
                             $refreshToken = $tokenSet->refreshToken;
                             if ($refreshToken !== '') {
-                                $this->logger->debug(sprintf('OpenID Connect: Set new refresh token with value "%s" in session', $refreshToken), LogEnvironment::fromMethodName(__METHOD__));
+                                $this->logger?->debug(sprintf('OpenID Connect: Set new refresh token with value "%s" in session', $refreshToken), LogEnvironment::fromMethodName(__METHOD__));
                                 $this->session->putData('flownative_oidc_refresh', $refreshToken);
                             } else {
-                                $this->logger->info('OpenID Connect: Did not receive new refresh token to set in session', LogEnvironment::fromMethodName(__METHOD__));
+                                $this->logger?->info('OpenID Connect: Did not receive new refresh token to set in session', LogEnvironment::fromMethodName(__METHOD__));
                             }
                         } catch (ConnectionException|ServiceException $e) {
-                            $this->logger->info(sprintf('OpenID Connect: Could not refresh JWT: %s', $e->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+                            $this->logger?->info(sprintf('OpenID Connect: Could not refresh JWT: %s', $e->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
                         }
                     } else {
-                        $this->logger->info(sprintf('OpenID Connect: The JWT "%s" is expired, no refresh token in session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
+                        $this->logger?->info(sprintf('OpenID Connect: The JWT "%s" is expired, no refresh token in session', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
                     }
                 }
             }
@@ -176,7 +161,7 @@ final class OpenIdConnectProvider extends AbstractProvider
 
         if ($identityToken->isExpiredAt(new \DateTimeImmutable())) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
-            $this->logger->info(sprintf('OpenID Connect: The JWT token "%s" is expired, need to re-authenticate', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->info(sprintf('OpenID Connect: The JWT token "%s" is expired, need to re-authenticate', $identityToken->values[$this->options['accountIdentifierTokenValueName']]), LogEnvironment::fromMethodName(__METHOD__));
             return;
         }
 
@@ -195,7 +180,7 @@ final class OpenIdConnectProvider extends AbstractProvider
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 
-        $this->logger->debug(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Roles: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), implode(', ', $this->getConfiguredRoles($identityToken))), LogEnvironment::fromMethodName(__METHOD__));
+        $this->logger?->debug(sprintf('OpenID Connect: Successfully authenticated account "%s" with authentication provider %s. Roles: %s', $account->getAccountIdentifier(), $account->getAuthenticationProviderName(), implode(', ', $this->getConfiguredRoles($identityToken))), LogEnvironment::fromMethodName(__METHOD__));
 
         $this->emitAuthenticated($authenticationToken, $identityToken, $this->policyService->getRoles());
     }
@@ -245,15 +230,15 @@ final class OpenIdConnectProvider extends AbstractProvider
     private function audienceMatches(string $expectedAudience, IdentityToken $identityToken): bool
     {
         if (empty($expectedAudience)) {
-            $this->logger->warning('OpenID Connect: The authentication provider was configured with an empty "audience" option', LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->warning('OpenID Connect: The authentication provider was configured with an empty "audience" option', LogEnvironment::fromMethodName(__METHOD__));
             return false;
         }
         if (!isset($identityToken->values['aud'])) {
-            $this->logger->warning(sprintf('OpenID Connect: The identity token (%s) contain no "aud" value', $identityToken->values['sub'] ?? '?'), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->warning(sprintf('OpenID Connect: The identity token (%s) contain no "aud" value', $identityToken->values['sub'] ?? '?'), LogEnvironment::fromMethodName(__METHOD__));
             return false;
         }
         if (!$identityToken->audienceContains($expectedAudience)) {
-            $this->logger->warning(sprintf('OpenID Connect: The identity token (%s) was intended for audience %s but this authentication provider is configured as audience "%s"', $identityToken->values['sub'] ?? '?', json_encode($identityToken->values['aud'], JSON_UNESCAPED_SLASHES), $expectedAudience), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->warning(sprintf('OpenID Connect: The identity token (%s) was intended for audience %s but this authentication provider is configured as audience "%s"', $identityToken->values['sub'] ?? '?', json_encode($identityToken->values['aud'], JSON_UNESCAPED_SLASHES), $expectedAudience), LogEnvironment::fromMethodName(__METHOD__));
             return false;
         }
         return true;
@@ -269,7 +254,7 @@ final class OpenIdConnectProvider extends AbstractProvider
 
         if (isset($this->options['roles']) && is_array($this->options['roles'])) {
             $roleIdentifiers = $this->options['roles'];
-            $this->logger->debug(sprintf('OpenID Connect: Adding the following fixed configured roles for identity token (%s): %s', $identityToken->values['sub'] ?? '', implode(', ', $roleIdentifiers)), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->debug(sprintf('OpenID Connect: Adding the following fixed configured roles for identity token (%s): %s', $identityToken->values['sub'] ?? '', implode(', ', $roleIdentifiers)), LogEnvironment::fromMethodName(__METHOD__));
         }
 
         if (isset($this->options['rolesFromClaims']) && is_array($this->options['rolesFromClaims'])) {
@@ -289,18 +274,18 @@ final class OpenIdConnectProvider extends AbstractProvider
                     $claim = $claim['name'];
                 }
                 if (!isset($identityToken->values[$claim])) {
-                    $this->logger->debug(sprintf('OpenID Connect: Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
+                    $this->logger?->debug(sprintf('OpenID Connect: Identity token (%s) contained no claim "%s"', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
                     continue;
                 }
                 if (!is_array($identityToken->values[$claim])) {
-                    $this->logger->error(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because the claim "%s" was not an array as expected.', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
+                    $this->logger?->error(sprintf('OpenID Connect: Failed retrieving roles from identity token (%s) because the claim "%s" was not an array as expected.', $identityToken->values['sub'] ?? '', $claim), LogEnvironment::fromMethodName(__METHOD__));
                     continue;
                 }
 
                 foreach ($identityToken->values[$claim] as $roleIdentifier) {
                     if ($mapping !== null) {
                         if (!array_key_exists($roleIdentifier, $mapping)) {
-                            $this->logger->debug(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no corresponding mapping configured.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
+                            $this->logger?->debug(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no corresponding mapping configured.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
                             continue;
                         }
                         $roleIdentifier = $mapping[$roleIdentifier];
@@ -308,7 +293,7 @@ final class OpenIdConnectProvider extends AbstractProvider
                     if ($this->policyService->hasRole($roleIdentifier)) {
                         $roleIdentifiers[] = $roleIdentifier;
                     } else {
-                        $this->logger->debug(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
+                        $this->logger?->debug(sprintf('OpenID Connect: Ignoring role "%s" from identity token (%s) because there is no such role configured in Flow.', $roleIdentifier, $identityToken->values['sub'] ?? ''), LogEnvironment::fromMethodName(__METHOD__));
                     }
                 }
 
@@ -317,16 +302,16 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (isset($this->options['addRolesFromExistingAccount']) && $this->options['addRolesFromExistingAccount'] === true) {
             $accountIdentifier = $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? null;
             if ($accountIdentifier === null) {
-                $this->logger->error(sprintf('OpenID Connect: Failed using account identifier from from identity token (%s) because the configured claim "%s" does not exist.', $identityToken->values['sub'] ?? '', $this->options['accountIdentifierTokenValueName']), LogEnvironment::fromMethodName(__METHOD__));
+                $this->logger?->error(sprintf('OpenID Connect: Failed using account identifier from from identity token (%s) because the configured claim "%s" does not exist.', $identityToken->values['sub'] ?? '', $this->options['accountIdentifierTokenValueName']), LogEnvironment::fromMethodName(__METHOD__));
             } else {
                 $existingAccount = $this->accountRepository->findActiveByAccountIdentifierAndAuthenticationProviderName($accountIdentifier, $this->name);
                 if ($existingAccount instanceof Account) {
                     foreach ($existingAccount->getRoles() as $role) {
                         $roleIdentifiers[] = $role->getIdentifier();
                     }
-                    $this->logger->debug(sprintf('OpenID Connect: Added roles (identity token %s) from existing account "%s"', $identityToken->values['sub'] ?? '', $existingAccount->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
+                    $this->logger?->debug(sprintf('OpenID Connect: Added roles (identity token %s) from existing account "%s"', $identityToken->values['sub'] ?? '', $existingAccount->getAccountIdentifier()), LogEnvironment::fromMethodName(__METHOD__));
                 } else {
-                    $this->logger->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account "%s" (provider: %s) does not exist.', $identityToken->values['sub'] ?? '', $accountIdentifier, $this->name), LogEnvironment::fromMethodName(__METHOD__));
+                    $this->logger?->notice(sprintf('OpenID Connect: Could not add roles from existing account for identity token (%s) because the account "%s" (provider: %s) does not exist.', $identityToken->values['sub'] ?? '', $accountIdentifier, $this->name), LogEnvironment::fromMethodName(__METHOD__));
                 }
             }
         }

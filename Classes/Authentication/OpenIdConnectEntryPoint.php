@@ -17,16 +17,13 @@ use Psr\Log\LoggerInterface;
 final class OpenIdConnectEntryPoint extends AbstractEntryPoint
 {
     /**
-     * @var LoggerInterface
+     * Not lazy, because a named injection would otherwise receive a dependency proxy which does not match the type.
      */
-    #[Flow\Inject(name: 'Neos.Flow:SecurityLogger')]
-    protected $logger;
+    #[Flow\Inject(name: 'Neos.Flow:SecurityLogger', lazy: false)]
+    protected ?LoggerInterface $logger = null;
 
-    /**
-     * @var OpenIdConnectClientFactory
-     */
     #[Flow\Inject]
-    protected $openIdConnectClientFactory;
+    protected OpenIdConnectClientFactory $openIdConnectClientFactory;
 
     /**
      * @throws ConfigurationException
@@ -34,21 +31,21 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
     public function startAuthentication(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
     {
         $this->validateOptions();
-        $this->logger->debug(sprintf('OpenID Connect: OpenIdConnectEntryPoint starting authentication for service "%s" ...', $this->options['serviceName']), LogEnvironment::fromMethodName(__METHOD__));
+        $this->logger?->debug(sprintf('OpenID Connect: OpenIdConnectEntryPoint starting authentication for service "%s" ...', $this->options['serviceName']), LogEnvironment::fromMethodName(__METHOD__));
 
         if ($this->hasAuthorizationHeader($request)) {
-            $this->logger->debug('OpenID Connect: OpenIdConnectEntryPoint detected "Authorization" header', LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->debug('OpenID Connect: OpenIdConnectEntryPoint detected "Authorization" header', LogEnvironment::fromMethodName(__METHOD__));
         }
 
         $client = $this->openIdConnectClientFactory->create($this->options['serviceName']);
         try {
             $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '', $this->options['requestRefreshToken'] ?? true);
         } catch (OAuthClientException | ServiceException $exception) {
-            $this->logger->error(sprintf('OpenID Connect: Authentication for service "%s" failed: %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->error(sprintf('OpenID Connect: Authentication for service "%s" failed: %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return $response;
         }
 
-        $this->logger->info(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" redirecting to %s', $this->options['serviceName'], $providerUri), LogEnvironment::fromMethodName(__METHOD__));
+        $this->logger?->info(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" redirecting to %s', $this->options['serviceName'], $providerUri), LogEnvironment::fromMethodName(__METHOD__));
 
         $body = ContentStream::fromContents(sprintf('<html lang="en"><head><meta http-equiv="refresh" content="0;url=%s"/><title>OpenID Connect</title></head></html>', htmlentities((string)$providerUri, ENT_QUOTES, 'utf-8')));
         return $response->withBody($body)->withStatus(303)->withHeader('Location', (string)$providerUri);

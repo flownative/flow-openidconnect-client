@@ -32,19 +32,11 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
 
     protected string $refreshToken = '';
 
-    /**
-     * @var OpenIdConnectClientFactory
-     */
     #[Flow\Inject]
-    protected $openIdConnectClientFactory;
+    protected OpenIdConnectClientFactory $openIdConnectClientFactory;
 
-    /**
-     * Not lazy, because it is passed on as a typed argument and a lazy dependency proxy would not match the type.
-     *
-     * @var HashService
-     */
-    #[Flow\Inject(lazy: false)]
-    protected $hashService;
+    #[Flow\Inject]
+    protected HashService $hashService;
 
     /**
      * @throws InvalidAuthenticationStatusException

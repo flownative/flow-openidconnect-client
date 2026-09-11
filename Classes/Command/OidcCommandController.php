@@ -16,11 +16,8 @@ final class OidcCommandController extends CommandController
      */
     protected $entityManager;
 
-    /**
-     * @var array
-     */
     #[Flow\InjectConfiguration]
-    protected $settings;
+    protected array $settings;
 
     /**
      * @param EntityManagerInterface $entityManager

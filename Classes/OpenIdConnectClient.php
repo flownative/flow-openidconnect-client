@@ -25,51 +25,30 @@ final class OpenIdConnectClient
 {
     /**
      * Service name which identifies the configuration of this OpenID Connect Client instance
-     *
-     * @var string
      */
-    private $serviceName;
+    private string $serviceName;
 
-    /**
-     * Options set for this client
-     *
-     * @var array
-     */
-    private $options;
+    private array $options = [];
 
-    /**
-     * Instance of the OAuth Client used for authorization
-     *
-     * @var OAuthClient
-     */
-    private $oAuthClient;
+    private OAuthClient $oAuthClient;
 
-    /**
-     * @var array
-     */
     #[Flow\InjectConfiguration]
-    protected $settings;
+    protected array $settings;
+
+    protected HttpClient $httpClient;
 
     /**
-     * @var HttpClient
+     * Not lazy, because a named injection would otherwise receive a dependency proxy which does not match the type.
      */
-    protected $httpClient;
+    #[Flow\Inject(name: 'Neos.Flow:SecurityLogger', lazy: false)]
+    protected ?LoggerInterface $logger = null;
+
+    #[Flow\Inject]
+    protected HashService $hashService;
 
     /**
-     * @var LoggerInterface
-     */
-    #[Flow\Inject(name: 'Neos.Flow:SecurityLogger')]
-    protected $logger;
-
-    /**
-     * Not lazy, because it is passed on as a typed argument and a lazy dependency proxy would not match the type.
+     * Not typed, because Flow injects the caches configured in Objects.yaml lazily and the dependency proxy would not match the type.
      *
-     * @var HashService
-     */
-    #[Flow\Inject(lazy: false)]
-    protected $hashService;
-
-    /**
      * @var VariableFrontend
      */
     protected $discoveryCache;
@@ -183,14 +162,14 @@ final class OpenIdConnectClient
         if ($authorization !== null) {
             $accessToken = $authorization->getAccessToken();
             if ($accessToken === null) {
-                $this->logger->warning(sprintf('OpenID Connect Client: Authorization %s for service "%s", clientId "%s" contained no token', $authorizationId, $serviceName, $clientId), LogEnvironment::fromMethodName(__METHOD__));
+                $this->logger?->warning(sprintf('OpenID Connect Client: Authorization %s for service "%s", clientId "%s" contained no token', $authorizationId, $serviceName, $clientId), LogEnvironment::fromMethodName(__METHOD__));
             } elseif ($accessToken->hasExpired()) {
-                $this->logger->info(sprintf('OpenID Connect Client: Access token contained in authorization %s for service "%s", clientId "%s" has expired', $authorizationId, $serviceName, $clientId), LogEnvironment::fromMethodName(__METHOD__));
+                $this->logger?->info(sprintf('OpenID Connect Client: Access token contained in authorization %s for service "%s", clientId "%s" has expired', $authorizationId, $serviceName, $clientId), LogEnvironment::fromMethodName(__METHOD__));
             }
         }
 
         if ($accessToken === null || $accessToken->hasExpired()) {
-            $this->logger->info(sprintf('OpenID Connect Client: Requesting new access token for service %s using client id %s %s', $serviceName, $clientId, ($scope ? 'requesting scope "' . $scope . '"' : 'requesting no scope')), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->info(sprintf('OpenID Connect Client: Requesting new access token for service %s using client id %s %s', $serviceName, $clientId, ($scope ? 'requesting scope "' . $scope . '"' : 'requesting no scope')), LogEnvironment::fromMethodName(__METHOD__));
 
             $this->oAuthClient->requestAccessToken($serviceName, $clientId, $clientSecret, $scope, $additionalParameters);
             $authorization = $this->getAuthorization($authorizationId);
@@ -205,7 +184,7 @@ final class OpenIdConnectClient
 
         } else {
             $expiresInSeconds = $accessToken->getExpires() - time();
-            $this->logger->debug(sprintf('OpenID Connect Client: Using existing access token for service %s using client id %s %s. Remaining lifetime: %d seconds', $serviceName, $clientId, ($scope ? 'with scope "' . $scope . '"' : 'without a scope'), $expiresInSeconds), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->debug(sprintf('OpenID Connect Client: Using existing access token for service %s using client id %s %s. Remaining lifetime: %d seconds', $serviceName, $clientId, ($scope ? 'with scope "' . $scope . '"' : 'without a scope'), $expiresInSeconds), LogEnvironment::fromMethodName(__METHOD__));
         }
 
         return $accessToken;
@@ -368,7 +347,7 @@ final class OpenIdConnectClient
                 throw new ConnectionException('OpenID Connect Client: Discovery endpoint returned invalid response.', 1554903349);
             }
             $this->discoveryCache->set($cacheIdentifier, $discoveredOptions);
-            $this->logger->info(sprintf('OpenID Connect Client: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->info(sprintf('OpenID Connect Client: Auto-discovery via %s succeeded and stored into cache.', $discoveryUri), LogEnvironment::fromMethodName(__METHOD__));
         }
 
         foreach ($discoveredOptions as $optionName => $optionValue) {
