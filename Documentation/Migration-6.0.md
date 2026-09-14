@@ -30,7 +30,7 @@ longer used.
 ## Requirements
 
 - PHP 8.3, 8.4 or 8.5
-- Flow 9.0 or later
+- Flow 8.3 (8.3.13 or later), Flow 8.4, or Flow 9.0 or later
 - flownative/oauth2-client 5.0
 - lcobucci/jwt 5.6 and Guzzle 7.9
 
