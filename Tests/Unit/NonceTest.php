@@ -13,6 +13,7 @@ namespace Flownative\OpenIdConnect\Client;
  * source code.
  */
 
+use Flownative\OAuth2\Client\BrowserBinding;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -102,6 +103,19 @@ class NonceTest extends TestCase
         ];
 
         static::assertSame([$cookie->getName()], Nonce::findCookieNames($cookies, $cookieSettings));
+    }
+
+    #[Test]
+    public function createBrowserBindingUsesTheCookieOfTheNonce(): void
+    {
+        $nonce = Nonce::generate();
+        $cookie = $nonce->createCookie(self::createCookieSettings());
+
+        $browserBinding = $nonce->createBrowserBinding(self::createCookieSettings());
+
+        self::assertSame($cookie->getName(), $browserBinding->cookieName);
+        self::assertSame($nonce->value, $browserBinding->getSecretHash());
+        self::assertTrue(BrowserBinding::isPresentInCookies($browserBinding->cookieName, $browserBinding->getSecretHash(), [$cookie->getName() => $cookie->getValue()]));
     }
 
     #[Test]

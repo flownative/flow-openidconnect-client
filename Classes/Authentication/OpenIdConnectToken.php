@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
+use Flownative\OAuth2\Client\UnknownAuthorizationHandleException;
 use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\CookieSettings;
 use Flownative\OpenIdConnect\Client\IdentityToken;
@@ -84,8 +85,8 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
                 throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', $authorizationIdQueryParameterName), 1560350311);
             }
             $signedTokenArguments = $this->queryParameters[self::OIDC_PARAMETER_NAME];
-            $authorizationIdentifier = $this->queryParameters[$authorizationIdQueryParameterName];
-            if (!is_string($signedTokenArguments) || !is_string($authorizationIdentifier)) {
+            $authorizationHandle = $this->queryParameters[$authorizationIdQueryParameterName];
+            if (!is_string($signedTokenArguments) || !is_string($authorizationHandle)) {
                 $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
                 throw new AccessDeniedException('The OpenID Connect query parameters are not strings', 1789122178);
             }
@@ -96,12 +97,13 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
                 throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
             }
 
-            // Creating the client may already contact the identity provider for discovery. The messages of the caught
-            // exceptions may contain the authorization identifier from the query, so they are not repeated here.
+            // Creating the client may already contact the identity provider for discovery
             try {
                 $client = $this->openIdConnectClientFactory->create($tokenArguments[TokenArguments::SERVICE_NAME]);
-                $tokenSet = $client->getIdentityToken($authorizationIdentifier);
-                $client->removeAuthorization($authorizationIdentifier);
+                $tokenSet = $client->getIdentityToken($authorizationHandle, $this->cookies);
+            } catch (UnknownAuthorizationHandleException $exception) {
+                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
+                throw new AccessDeniedException('The finished authorization is unknown, has expired or was not started in this browser', 1789395654, $exception);
             } catch (ServiceException | ConnectionException $exception) {
                 throw new AccessDeniedException('Could not retrieve the identity token of the finished authorization', 1560350413, $exception);
             }

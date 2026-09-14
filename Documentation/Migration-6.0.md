@@ -226,6 +226,10 @@ browser must still have the cookie.
   started in this browser" in the security log.
 - Logins which are in progress while you deploy the update fail once,
   see [Rejected logins](#rejected-logins).
+- flownative/oauth2-client uses the same cookie to bind the
+  authorization to the browser. A return from the identity provider
+  without the cookie is already rejected by its callback, with status
+  400.
 
 ### Code Which Starts an Authorization
 
@@ -339,6 +343,7 @@ reasons for sending the scope.
 | `TokenArguments::fromSignedString($string)`                          | `TokenArguments::fromSignedString($string, $hashService)`                                                  |
 | `startAuthorization($returnToUri, $scope, $requestRefreshToken)`     | `startAuthorization($returnToUri, $scope, $nonce, $requestRefreshToken)`                                   |
 | `refreshIdentityToken($identityToken, $refreshToken)`                | `refreshIdentityToken($refreshToken)`                                                                      |
+| `getIdentityToken($authorizationIdentifier)`, then `removeAuthorization($authorizationIdentifier)` | `getIdentityToken($authorizationHandle, $cookies)`, which also removes the authorization |
 | `IdentityToken::isExpiredAt()` returns false for tokens without "exp" | returns true                                                                                              |
 
 ## Log Messages

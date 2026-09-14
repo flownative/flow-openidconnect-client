@@ -92,6 +92,18 @@ class OAuthClient extends BaseOAuthClient
         return $this->options['clientId'];
     }
 
+    /**
+     * @throws ConfigurationException
+     */
+    public function getClientSecret(string $clientId): string
+    {
+        $this->initializeOptionsIfNeeded();
+        if ($clientId !== ($this->options['clientId'] ?? null) || !isset($this->options['clientSecret']) || !is_string($this->options['clientSecret'])) {
+            throw new ConfigurationException(sprintf('Missing configuration clientSecret for client id "%s" of service "%s" (%s). Configure it explicitly via settings.', $clientId, $this->getServiceName(), self::getServiceType()), 1789395653);
+        }
+        return $this->options['clientSecret'];
+    }
+
     public static function getServiceType(): string
     {
         return self::SERVICE_TYPE;

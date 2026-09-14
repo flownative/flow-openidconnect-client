@@ -15,6 +15,7 @@ namespace Flownative\OpenIdConnect\Client;
 
 use DateTimeImmutable;
 use Flownative\OAuth2\Client\Authorization;
+use Flownative\OAuth2\Client\BrowserBinding;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\JwtFixture;
@@ -105,7 +106,7 @@ class OpenIdConnectClientTest extends TestCase
         $returnToUri = null;
         $oAuthClient = $this->createStub(OAuthClient::class);
         $oAuthClient->method('startAuthorization')->willReturnCallback(
-            function (string $clientId, string $clientSecret, UriInterface $givenReturnToUri) use (&$returnToUri): UriInterface {
+            function (string $clientId, UriInterface $givenReturnToUri) use (&$returnToUri): UriInterface {
                 $returnToUri = $givenReturnToUri;
                 return new Uri('https://id.example.com/authorize');
             }
@@ -121,17 +122,73 @@ class OpenIdConnectClientTest extends TestCase
     }
 
     #[Test]
+    public function startAuthorizationBindsTheAuthorizationToTheCookieOfTheNonce(): void
+    {
+        $browserBinding = null;
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturnCallback(
+            function (string $clientId, UriInterface $returnToUri, string $scope, BrowserBinding $givenBrowserBinding) use (&$browserBinding): UriInterface {
+                $browserBinding = $givenBrowserBinding;
+                return new Uri('https://id.example.com/authorize');
+            }
+        );
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class));
+        $nonce = Nonce::generate();
+
+        $client->startAuthorization(new Uri('https://www.example.com/secure'), 'profile', $nonce);
+
+        $nonceCookie = $nonce->createCookie(CookieSettings::fromMiddlewareSettings([]));
+        static::assertSame($nonceCookie->getName(), $browserBinding->cookieName);
+        static::assertTrue(BrowserBinding::isPresentInCookies($browserBinding->cookieName, $browserBinding->getSecretHash(), [$nonceCookie->getName() => $nonceCookie->getValue()]));
+    }
+
+    #[Test]
+    public function getIdentityTokenRemovesTheClaimedAuthorizationEvenIfItContainsNoIdentityToken(): void
+    {
+        $authorization = new Authorization('oidc-test-authorization', 'oidc', OpenIdConnectClientFixture::CLIENT_ID, Authorization::GRANT_AUTHORIZATION_CODE, 'openid');
+        $authorization->setSerializedAccessToken(json_encode(new AccessToken(['access_token' => 'the-access-token']), JSON_THROW_ON_ERROR));
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->expects($this->once())->method('claimAuthorization')->with('the-handle', ['the-cookie' => 'the-secret'])->willReturn($authorization);
+        $oAuthClient->expects($this->once())->method('removeAuthorization')->with('oidc-test-authorization');
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class));
+
+        $this->expectException(ServiceException::class);
+        $this->expectExceptionCode(1559208674);
+        $client->getIdentityToken('the-handle', ['the-cookie' => 'the-secret']);
+    }
+
+    #[Test]
     public function getIdentityTokenAcceptsAuthorizationWithoutRefreshToken(): void
     {
         $authorization = new Authorization('oidc-test-authorization', 'oidc', OpenIdConnectClientFixture::CLIENT_ID, Authorization::GRANT_AUTHORIZATION_CODE, 'openid');
         $authorization->setSerializedAccessToken(json_encode(new AccessToken(['access_token' => 'the-access-token', 'id_token' => JwtFixture::createSignedJwt(['sub' => 'the-subject'])]), JSON_THROW_ON_ERROR));
         $oAuthClient = $this->createStub(OAuthClient::class);
-        $oAuthClient->method('getAuthorization')->willReturn($authorization);
+        $oAuthClient->method('claimAuthorization')->willReturn($authorization);
         $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class));
 
-        $tokenSet = $client->getIdentityToken('oidc-test-authorization');
+        $tokenSet = $client->getIdentityToken('the-handle', ['the-cookie' => 'the-secret']);
 
         static::assertSame('', $tokenSet->refreshToken);
+    }
+
+    #[Test]
+    public function oAuthClientReturnsTheClientSecretOfTheService(): void
+    {
+        $oAuthClient = new OAuthClient(OpenIdConnectClientFixture::SERVICE_NAME);
+        $oAuthClient->setOpenIdConnectClient(OpenIdConnectClientFixture::createClient($this->createStub(OAuthClient::class), OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class)));
+
+        static::assertSame(OpenIdConnectClientFixture::CLIENT_SECRET, $oAuthClient->getClientSecret(OpenIdConnectClientFixture::CLIENT_ID));
+    }
+
+    #[Test]
+    public function oAuthClientRejectsClientSecretRequestForAnotherClientId(): void
+    {
+        $oAuthClient = new OAuthClient(OpenIdConnectClientFixture::SERVICE_NAME);
+        $oAuthClient->setOpenIdConnectClient(OpenIdConnectClientFixture::createClient($this->createStub(OAuthClient::class), OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class)));
+
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionCode(1789395653);
+        $oAuthClient->getClientSecret('another-client');
     }
 
     #[Test]

@@ -14,6 +14,7 @@ namespace Flownative\OpenIdConnect\Client;
  */
 
 use Flownative\OAuth2\Client\Authorization;
+use Flownative\OAuth2\Client\UnknownAuthorizationHandleException;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
@@ -34,6 +35,7 @@ class OpenIdConnectTokenTest extends TestCase
 {
     private const string COOKIE_NAME = 'flownative_oidc_jwt';
     private const string AUTHORIZATION_ID = 'oidc-test-4c1b7a0e-6f0c-4f7e-9d59-2d3a8c1f5e21';
+    private const string AUTHORIZATION_HANDLE = '6f1c0b2d9a8e4f7c3b5a1d0e9f8c7b6a5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a';
 
     #[Test]
     public function updateCredentialsResetsAuthenticationStatus(): void
@@ -206,6 +208,23 @@ class OpenIdConnectTokenTest extends TestCase
     }
 
     #[Test]
+    public function extractIdentityTokenFromRequestClaimsTheAuthorizationWithTheCookiesOfTheRequest(): void
+    {
+        $hashService = OpenIdConnectClientFixture::createHashService();
+        $nonce = Nonce::generate();
+        $nonceCookies = self::createNonceCookies($nonce);
+        $authorization = new Authorization(self::AUTHORIZATION_ID, 'oidc', OpenIdConnectClientFixture::CLIENT_ID, Authorization::GRANT_AUTHORIZATION_CODE, 'openid');
+        $authorization->setSerializedAccessToken(json_encode(new AccessToken(['access_token' => 'the-access-token', 'id_token' => self::createUnsignedJwt(['sub' => 'returning-subject', 'nonce' => $nonce->value])]), JSON_THROW_ON_ERROR));
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->expects($this->once())->method('claimAuthorization')->with(self::AUTHORIZATION_HANDLE, $nonceCookies)->willReturn($authorization);
+
+        $token = $this->createTokenWithClient($oAuthClient, $hashService);
+        $token->updateCredentials(self::createActionRequest(cookies: $nonceCookies, queryParameters: self::createReturnQueryParameters($hashService, $nonce->value)));
+
+        $token->extractIdentityTokenFromRequest(self::COOKIE_NAME);
+    }
+
+    #[Test]
     public function extractIdentityTokenFromRequestAcceptsNonceCookieWithoutHostPrefixIfCookiesAreInsecure(): void
     {
         $hashService = OpenIdConnectClientFixture::createHashService();
@@ -287,18 +306,22 @@ class OpenIdConnectTokenTest extends TestCase
     }
 
     #[Test]
-    public function extractIdentityTokenFromRequestDeniesAccessIfAuthorizationDoesNotExist(): void
+    public function extractIdentityTokenFromRequestDeniesAccessIfTheAuthorizationHandleIsNotAccepted(): void
     {
         $hashService = OpenIdConnectClientFixture::createHashService();
         $oAuthClient = $this->createStub(OAuthClient::class);
-        $oAuthClient->method('getAuthorization')->willReturn(null);
+        $oAuthClient->method('claimAuthorization')->willThrowException(new UnknownAuthorizationHandleException('The authorization was not started in this browser.', 1789395649));
 
         $token = $this->createTokenWithClient($oAuthClient, $hashService);
         $token->updateCredentials(self::createActionRequest(queryParameters: self::createReturnQueryParameters($hashService)));
 
-        $this->expectException(AccessDeniedException::class);
-        $this->expectExceptionCode(1560350413);
-        $token->extractIdentityTokenFromRequest(self::COOKIE_NAME);
+        try {
+            $token->extractIdentityTokenFromRequest(self::COOKIE_NAME);
+            static::fail('Expected an AccessDeniedException');
+        } catch (AccessDeniedException $exception) {
+            static::assertSame(1789395654, $exception->getCode());
+        }
+        static::assertSame(TokenInterface::WRONG_CREDENTIALS, $token->getAuthenticationStatus());
     }
 
     #[Test]
@@ -376,7 +399,7 @@ class OpenIdConnectTokenTest extends TestCase
         $authorization->setSerializedAccessToken(json_encode(new AccessToken(['access_token' => 'the-access-token', 'refresh_token' => 'the-refresh-token', 'id_token' => $identityTokenJwt]), JSON_THROW_ON_ERROR));
 
         $oAuthClient = $this->createMock(OAuthClient::class);
-        $oAuthClient->method('getAuthorization')->willReturnMap([[self::AUTHORIZATION_ID, $authorization]]);
+        $oAuthClient->method('claimAuthorization')->willReturnCallback(fn (string $authorizationHandle): Authorization => $authorizationHandle === self::AUTHORIZATION_HANDLE ? $authorization : throw new UnknownAuthorizationHandleException('Unknown handle', 1789395647));
         $oAuthClient->expects($this->once())->method('removeAuthorization')->with(self::AUTHORIZATION_ID);
         return $oAuthClient;
     }
@@ -395,7 +418,7 @@ class OpenIdConnectTokenTest extends TestCase
         }
         return [
             OpenIdConnectToken::OIDC_PARAMETER_NAME => (string)TokenArguments::fromArray($tokenArguments, $hashService),
-            OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE) => self::AUTHORIZATION_ID,
+            OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE) => self::AUTHORIZATION_HANDLE,
         ];
     }
 

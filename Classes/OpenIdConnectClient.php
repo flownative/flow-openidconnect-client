@@ -7,6 +7,7 @@ use Doctrine\ORM\Exception\ORMException;
 use Doctrine\ORM\OptimisticLockException;
 use Flownative\OAuth2\Client\Authorization;
 use Flownative\OAuth2\Client\OAuthClientException;
+use Flownative\OAuth2\Client\UnknownAuthorizationHandleException;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
@@ -63,6 +64,9 @@ final class OpenIdConnectClient
 
     #[Flow\InjectConfiguration]
     protected array $settings;
+
+    #[Flow\InjectConfiguration(path: 'middleware')]
+    protected array $middlewareSettings = [];
 
     protected HttpClient $httpClient;
 
@@ -206,37 +210,45 @@ final class OpenIdConnectClient
         if (empty($this->options['clientId']) || empty($this->options['clientSecret'])) {
             throw new RuntimeException(sprintf('OpenID Connect Client: Authorization Code Flow requires "clientId" and "clientSecret" to be configured for service "%s".', $this->serviceName), 1596456168);
         }
-        return $this->oAuthClient->startAuthorization($this->options['clientId'], $this->options['clientSecret'], $returnToUri, $this->buildAuthorizationScope($scope, $requestRefreshToken), ['nonce' => $nonce->value]);
+        // The cookie of the nonce also binds the authorization to the browser, so that the code is only redeemed for the browser which started the login
+        $browserBinding = $nonce->createBrowserBinding(CookieSettings::fromMiddlewareSettings($this->middlewareSettings));
+        return $this->oAuthClient->startAuthorization($this->options['clientId'], $returnToUri, $this->buildAuthorizationScope($scope, $requestRefreshToken), $browserBinding, ['nonce' => $nonce->value]);
     }
 
     /**
-     * Returns the current identity token and refresh token in a TokenSet
+     * Returns the identity token and refresh token of a finished authorization, and removes the authorization
      *
-     * @throws ConnectionException
-     * @throws ServiceException|SodiumException
+     * The OAuth client hands out the authorization only once, and only to the browser which started it.
+     *
+     * @param string $authorizationHandle The handle from the return URI of the authorization
+     * @param array $cookies The cookies of the current request
+     * @throws ServiceException
+     * @throws UnknownAuthorizationHandleException
+     * @throws SodiumException
      */
-    public function getIdentityToken(string $authorizationIdentifier): TokenSet
+    public function getIdentityToken(string $authorizationHandle, array $cookies): TokenSet
     {
-        $authorization = $this->getAuthorization($authorizationIdentifier);
-        if (!$authorization instanceof Authorization) {
-            throw new ServiceException(sprintf('OpenID Connect Client: Authorization %s was not found', $authorizationIdentifier), 1567853403);
-        }
-        $accessToken = $authorization->getAccessToken();
-        if (!$accessToken) {
-            throw new ServiceException(sprintf('OpenID Connect Client: Authorization %s contained no access token', $authorizationIdentifier), 1567853441);
-        }
-        $tokenValues = $accessToken->getValues();
-        if (!isset($tokenValues['id_token'])) {
-            throw new ServiceException('OpenID Connect Client: No id_token found in values of current oAuth token', 1559208674);
-        }
-        // Identity providers only issue a refresh token if the login requested one and the provider allows it
+        $authorization = $this->oAuthClient->claimAuthorization($authorizationHandle, $cookies);
         try {
-            return new TokenSet(
-                IdentityToken::fromJwt($tokenValues['id_token']),
-                $accessToken->getRefreshToken() ?? ''
-            );
-        } catch (InvalidArgumentException $e) {
-            throw new ServiceException('OpenID Connect Client: Failed parsing identity token from JWT', 1602501992, $e);
+            $accessToken = $authorization->getAccessToken();
+            if (!$accessToken) {
+                throw new ServiceException('OpenID Connect Client: The finished authorization contained no access token', 1567853441);
+            }
+            $tokenValues = $accessToken->getValues();
+            if (!isset($tokenValues['id_token'])) {
+                throw new ServiceException('OpenID Connect Client: No id_token found in values of current oAuth token', 1559208674);
+            }
+            try {
+                // Identity providers only issue a refresh token if the login requested one and the provider allows it
+                return new TokenSet(
+                    IdentityToken::fromJwt($tokenValues['id_token']),
+                    $accessToken->getRefreshToken() ?? ''
+                );
+            } catch (InvalidArgumentException $e) {
+                throw new ServiceException('OpenID Connect Client: Failed parsing identity token from JWT', 1602501992, $e);
+            }
+        } finally {
+            $this->oAuthClient->removeAuthorization($authorization->getAuthorizationId());
         }
     }
 

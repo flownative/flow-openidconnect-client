@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
+use Flownative\OAuth2\Client\BrowserBinding;
 use Flownative\OpenIdConnect\Client\CookieSettings;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\Cookie;
@@ -58,6 +59,14 @@ final readonly class Nonce
             array_map('strval', array_keys($cookies)),
             static fn (string $cookieName): bool => preg_match($pattern, $cookieName) === 1
         ));
+    }
+
+    /**
+     * Returns a browser binding for the OAuth client which uses the cookie of this nonce, so that a login needs only one cookie
+     */
+    public function createBrowserBinding(CookieSettings $cookieSettings): BrowserBinding
+    {
+        return BrowserBinding::fromExistingCookie(self::getCookieNameForValue($this->value, $cookieSettings), $this->secret);
     }
 
     public function createCookie(CookieSettings $cookieSettings): Cookie

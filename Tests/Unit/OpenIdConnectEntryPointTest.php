@@ -13,6 +13,7 @@ namespace Flownative\OpenIdConnect\Client;
  * source code.
  */
 
+use Flownative\OAuth2\Client\BrowserBinding;
 use Flownative\OAuth2\Client\OAuthClientException;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectEntryPoint;
@@ -123,10 +124,12 @@ class OpenIdConnectEntryPointTest extends TestCase
     public function startAuthenticationBindsAuthorizationToBrowserWithNonceCookie(): void
     {
         $authorizationParameters = [];
+        $browserBinding = null;
         $oAuthClient = $this->createStub(OAuthClient::class);
         $oAuthClient->method('startAuthorization')->willReturnCallback(
-            function (string $clientId, string $clientSecret, UriInterface $returnToUri, string $scope, array $givenAuthorizationParameters) use (&$authorizationParameters): UriInterface {
+            function (string $clientId, UriInterface $returnToUri, string $scope, BrowserBinding $givenBrowserBinding, array $givenAuthorizationParameters) use (&$authorizationParameters, &$browserBinding): UriInterface {
                 $authorizationParameters = $givenAuthorizationParameters;
+                $browserBinding = $givenBrowserBinding;
                 return new Uri(self::AUTHORIZATION_URI);
             }
         );
@@ -137,6 +140,7 @@ class OpenIdConnectEntryPointTest extends TestCase
         static::assertMatchesRegularExpression('/^(__Host-flownative_oidc_nonce_[0-9a-f]{16})=([0-9a-f]{64}); Max-Age=3600; Path=\/; Secure; HttpOnly; SameSite=lax$/', $response->getHeaderLine('Set-Cookie'));
         preg_match('/^([^=]+)=([^;]+);/', $response->getHeaderLine('Set-Cookie'), $matches);
         static::assertTrue(Nonce::isBoundToCookies($authorizationParameters['nonce'], [$matches[1] => $matches[2]], CookieSettings::fromMiddlewareSettings([])));
+        static::assertTrue(BrowserBinding::isPresentInCookies($browserBinding->cookieName, $browserBinding->getSecretHash(), [$matches[1] => $matches[2]]));
     }
 
     public static function insecureCookieSettings(): array
@@ -171,7 +175,7 @@ class OpenIdConnectEntryPointTest extends TestCase
         $authorizationParameters = [];
         $oAuthClient = $this->createStub(OAuthClient::class);
         $oAuthClient->method('startAuthorization')->willReturnCallback(
-            function (string $clientId, string $clientSecret, UriInterface $givenReturnToUri, string $givenScope, array $givenAuthorizationParameters) use (&$returnToUri, &$scope, &$authorizationParameters): UriInterface {
+            function (string $clientId, UriInterface $givenReturnToUri, string $givenScope, BrowserBinding $browserBinding, array $givenAuthorizationParameters) use (&$returnToUri, &$scope, &$authorizationParameters): UriInterface {
                 $returnToUri = $givenReturnToUri;
                 $scope = $givenScope;
                 $authorizationParameters = $givenAuthorizationParameters;
@@ -255,7 +259,7 @@ class OpenIdConnectEntryPointTest extends TestCase
         $scope = null;
         $oAuthClient = $this->createStub(OAuthClient::class);
         $oAuthClient->method('startAuthorization')->willReturnCallback(
-            function (string $clientId, string $clientSecret, UriInterface $returnToUri, string $givenScope) use (&$scope): UriInterface {
+            function (string $clientId, UriInterface $returnToUri, string $givenScope) use (&$scope): UriInterface {
                 $scope = $givenScope;
                 return new Uri(self::AUTHORIZATION_URI);
             }
