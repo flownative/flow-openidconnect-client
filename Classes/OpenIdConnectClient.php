@@ -229,10 +229,11 @@ final class OpenIdConnectClient
         if (!isset($tokenValues['id_token'])) {
             throw new ServiceException('OpenID Connect Client: No id_token found in values of current oAuth token', 1559208674);
         }
+        // Identity providers only issue a refresh token if the login requested one and the provider allows it
         try {
             return new TokenSet(
                 IdentityToken::fromJwt($tokenValues['id_token']),
-                $accessToken->getRefreshToken()
+                $accessToken->getRefreshToken() ?? ''
             );
         } catch (InvalidArgumentException $e) {
             throw new ServiceException('OpenID Connect Client: Failed parsing identity token from JWT', 1602501992, $e);

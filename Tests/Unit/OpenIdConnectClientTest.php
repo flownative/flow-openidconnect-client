@@ -17,6 +17,7 @@ use DateTimeImmutable;
 use Flownative\OAuth2\Client\Authorization;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
+use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\JwtFixture;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\OpenIdConnectClientFixture;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\ConnectException;
@@ -117,6 +118,20 @@ class OpenIdConnectClientTest extends TestCase
         parse_str($returnToUri->getQuery(), $queryParameters);
         static::assertSame(['page', OpenIdConnectToken::OIDC_PARAMETER_NAME], array_keys($queryParameters));
         static::assertNotSame('stale', $queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME]);
+    }
+
+    #[Test]
+    public function getIdentityTokenAcceptsAuthorizationWithoutRefreshToken(): void
+    {
+        $authorization = new Authorization('oidc-test-authorization', 'oidc', OpenIdConnectClientFixture::CLIENT_ID, Authorization::GRANT_AUTHORIZATION_CODE, 'openid');
+        $authorization->setSerializedAccessToken(json_encode(new AccessToken(['access_token' => 'the-access-token', 'id_token' => JwtFixture::createSignedJwt(['sub' => 'the-subject'])]), JSON_THROW_ON_ERROR));
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('getAuthorization')->willReturn($authorization);
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class));
+
+        $tokenSet = $client->getIdentityToken('oidc-test-authorization');
+
+        static::assertSame('', $tokenSet->refreshToken);
     }
 
     #[Test]
