@@ -230,6 +230,10 @@ browser must still have the cookie.
   authorization to the browser. A return from the identity provider
   without the cookie is already rejected by its callback, with status
   400.
+- With the cookie setting "secure" set to false, the cookie has neither
+  the "Secure" flag nor the "__Host-" prefix and protects the login
+  less. The client logs a warning for each such login. Use this setting
+  only for development without HTTPS.
 
 ### Code Which Starts an Authorization
 

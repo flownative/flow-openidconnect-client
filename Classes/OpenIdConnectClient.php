@@ -5,6 +5,7 @@ namespace Flownative\OpenIdConnect\Client;
 
 use Doctrine\ORM\Exception\ORMException;
 use Doctrine\ORM\OptimisticLockException;
+use Exception;
 use Flownative\OAuth2\Client\Authorization;
 use Flownative\OAuth2\Client\OAuthClientException;
 use Flownative\OAuth2\Client\UnknownAuthorizationHandleException;
@@ -210,8 +211,12 @@ final class OpenIdConnectClient
         if (empty($this->options['clientId']) || empty($this->options['clientSecret'])) {
             throw new RuntimeException(sprintf('OpenID Connect Client: Authorization Code Flow requires "clientId" and "clientSecret" to be configured for service "%s".', $this->serviceName), 1596456168);
         }
+        $cookieSettings = CookieSettings::fromMiddlewareSettings($this->middlewareSettings);
+        if (!$cookieSettings->secure) {
+            $this->logger?->warning(sprintf('OpenID Connect Client: The login cookies for service "%s" are not secure. This setting is only meant for development without HTTPS.', $this->serviceName), LogEnvironment::fromMethodName(__METHOD__));
+        }
         // The cookie of the nonce also binds the authorization to the browser, so that the code is only redeemed for the browser which started the login
-        $browserBinding = $nonce->createBrowserBinding(CookieSettings::fromMiddlewareSettings($this->middlewareSettings));
+        $browserBinding = $nonce->createBrowserBinding($cookieSettings);
         return $this->oAuthClient->startAuthorization($this->options['clientId'], $returnToUri, $this->buildAuthorizationScope($scope, $requestRefreshToken), $browserBinding, ['nonce' => $nonce->value]);
     }
 
@@ -248,7 +253,12 @@ final class OpenIdConnectClient
                 throw new ServiceException('OpenID Connect Client: Failed parsing identity token from JWT', 1602501992, $e);
             }
         } finally {
-            $this->oAuthClient->removeAuthorization($authorization->getAuthorizationId());
+            try {
+                $this->oAuthClient->removeAuthorization($authorization->getAuthorizationId());
+            } catch (Exception $exception) {
+                // An exception thrown here would replace the one of the token check, and the garbage collection removes the authorization once it expires
+                $this->logger?->error(sprintf('OpenID Connect Client: Failed removing the claimed authorization of service "%s": %s', $this->serviceName, $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+            }
         }
     }
 

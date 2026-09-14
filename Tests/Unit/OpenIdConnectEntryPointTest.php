@@ -70,6 +70,24 @@ class OpenIdConnectEntryPointTest extends TestCase
         static::assertSame('no-store', $response->getHeaderLine('Cache-Control'));
     }
 
+    #[Test]
+    public function startAuthenticationLogsAuthorizationEndpointWithoutQuery(): void
+    {
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturn(new Uri(self::AUTHORIZATION_URI));
+        $loggedMessages = [];
+        $logger = $this->createStub(LoggerInterface::class);
+        $logger->method('info')->willReturnCallback(function (string $message) use (&$loggedMessages): void {
+            $loggedMessages[] = $message;
+        });
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test'], logger: $logger);
+
+        $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure'), new Response());
+
+        static::assertStringContainsString('redirecting to https://id.example.com/authorize', implode("\n", $loggedMessages));
+        static::assertStringNotContainsString('state=', implode("\n", $loggedMessages));
+    }
+
     public static function requestsWhichDoNotNavigate(): array
     {
         return [
@@ -282,9 +300,9 @@ class OpenIdConnectEntryPointTest extends TestCase
         static::assertSame($originalResponse, $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/'), $originalResponse));
     }
 
-    private function createEntryPoint(OAuthClient $oAuthClient, array $options, ?HashService $hashService = null): OpenIdConnectEntryPoint
+    private function createEntryPoint(OAuthClient $oAuthClient, array $options, ?HashService $hashService = null, ?LoggerInterface $logger = null): OpenIdConnectEntryPoint
     {
-        $logger = $this->createStub(LoggerInterface::class);
+        $logger ??= $this->createStub(LoggerInterface::class);
         $client = OpenIdConnectClientFixture::createClient($oAuthClient, $hashService ?? OpenIdConnectClientFixture::createHashService(), $logger);
         $clientFactory = $this->createStub(OpenIdConnectClientFactory::class);
         $clientFactory->method('create')->willReturn($client);

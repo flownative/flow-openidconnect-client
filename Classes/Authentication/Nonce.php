@@ -66,7 +66,7 @@ final readonly class Nonce
      */
     public function createBrowserBinding(CookieSettings $cookieSettings): BrowserBinding
     {
-        return BrowserBinding::fromExistingCookie(self::getCookieNameForValue($this->value, $cookieSettings), $this->secret);
+        return BrowserBinding::fromExistingCookie(self::getCookieNameForValue($this->value, $cookieSettings), $this->secret, $cookieSettings->secure);
     }
 
     public function createCookie(CookieSettings $cookieSettings): Cookie

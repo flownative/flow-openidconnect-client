@@ -19,6 +19,7 @@ use Flownative\OAuth2\Client\BrowserBinding;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\JwtFixture;
+use RuntimeException;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\OpenIdConnectClientFixture;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\ConnectException;
@@ -143,6 +144,31 @@ class OpenIdConnectClientTest extends TestCase
     }
 
     #[Test]
+    public function startAuthorizationWarnsIfTheLoginCookiesAreNotSecure(): void
+    {
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturn(new Uri('https://id.example.com/authorize'));
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())->method('warning')->with($this->stringContains('not secure'));
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $logger);
+        OpenIdConnectClientFixture::inject($client, 'middlewareSettings', ['cookie' => ['secure' => false]]);
+
+        $client->startAuthorization(new Uri('https://www.example.com/secure'), 'profile', Nonce::generate());
+    }
+
+    #[Test]
+    public function startAuthorizationDoesNotWarnIfTheLoginCookiesAreSecure(): void
+    {
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturn(new Uri('https://id.example.com/authorize'));
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->never())->method('warning');
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $logger);
+
+        $client->startAuthorization(new Uri('https://www.example.com/secure'), 'profile', Nonce::generate());
+    }
+
+    #[Test]
     public function getIdentityTokenRemovesTheClaimedAuthorizationEvenIfItContainsNoIdentityToken(): void
     {
         $authorization = new Authorization('oidc-test-authorization', 'oidc', OpenIdConnectClientFixture::CLIENT_ID, Authorization::GRANT_AUTHORIZATION_CODE, 'openid');
@@ -169,6 +195,38 @@ class OpenIdConnectClientTest extends TestCase
         $tokenSet = $client->getIdentityToken('the-handle', ['the-cookie' => 'the-secret']);
 
         static::assertSame('', $tokenSet->refreshToken);
+    }
+
+    #[Test]
+    public function getIdentityTokenReturnsTokenSetIfTheClaimedAuthorizationCannotBeRemoved(): void
+    {
+        $authorization = new Authorization('oidc-test-authorization', 'oidc', OpenIdConnectClientFixture::CLIENT_ID, Authorization::GRANT_AUTHORIZATION_CODE, 'openid');
+        $authorization->setSerializedAccessToken(json_encode(new AccessToken(['access_token' => 'the-access-token', 'id_token' => JwtFixture::createSignedJwt(['sub' => 'the-subject'])]), JSON_THROW_ON_ERROR));
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('claimAuthorization')->willReturn($authorization);
+        $oAuthClient->method('removeAuthorization')->willThrowException(new RuntimeException('The database is gone'));
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())->method('error')->with($this->stringContains('The database is gone'));
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $logger);
+
+        $tokenSet = $client->getIdentityToken('the-handle', ['the-cookie' => 'the-secret']);
+
+        static::assertSame('the-subject', $tokenSet->identityToken->values['sub']);
+    }
+
+    #[Test]
+    public function getIdentityTokenKeepsTheExceptionOfTheTokenCheckIfTheClaimedAuthorizationCannotBeRemoved(): void
+    {
+        $authorization = new Authorization('oidc-test-authorization', 'oidc', OpenIdConnectClientFixture::CLIENT_ID, Authorization::GRANT_AUTHORIZATION_CODE, 'openid');
+        $authorization->setSerializedAccessToken(json_encode(new AccessToken(['access_token' => 'the-access-token']), JSON_THROW_ON_ERROR));
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('claimAuthorization')->willReturn($authorization);
+        $oAuthClient->method('removeAuthorization')->willThrowException(new RuntimeException('The database is gone'));
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class));
+
+        $this->expectException(ServiceException::class);
+        $this->expectExceptionCode(1559208674);
+        $client->getIdentityToken('the-handle', ['the-cookie' => 'the-secret']);
     }
 
     #[Test]

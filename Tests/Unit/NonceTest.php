@@ -119,6 +119,15 @@ class NonceTest extends TestCase
     }
 
     #[Test]
+    public function createBrowserBindingKeepsTheSecureSettingOfTheCookie(): void
+    {
+        $nonce = Nonce::generate();
+
+        self::assertTrue($nonce->createBrowserBinding(self::createCookieSettings())->createCookie()->isSecure());
+        self::assertFalse($nonce->createBrowserBinding(self::createCookieSettings(false))->createCookie()->isSecure());
+    }
+
+    #[Test]
     public function createRemovalCookieExpiresTheCookie(): void
     {
         static::assertSame('flownative_oidc_nonce_0123456789abcdef=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; HttpOnly; SameSite=lax', (string)Nonce::createRemovalCookie('flownative_oidc_nonce_0123456789abcdef', self::createCookieSettings(false)));

@@ -64,7 +64,8 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
             return $response;
         }
 
-        $this->logger?->info(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" redirecting to %s', $this->options['serviceName'], $providerUri), LogEnvironment::fromMethodName(__METHOD__));
+        // The query contains the state and the nonce of the login
+        $this->logger?->info(sprintf('OpenID Connect: OpenIdConnectEntryPoint for service "%s" redirecting to %s', $this->options['serviceName'], $providerUri->withQuery('')), LogEnvironment::fromMethodName(__METHOD__));
 
         $body = ContentStream::fromContents(sprintf('<html lang="en"><head><meta http-equiv="refresh" content="0;url=%s"/><title>OpenID Connect</title></head></html>', htmlentities((string)$providerUri, ENT_QUOTES, 'utf-8')));
         // The response carries the secret of the nonce, so no cache may store it

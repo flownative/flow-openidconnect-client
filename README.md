@@ -266,7 +266,7 @@ Flownative:
             clientSecret: 'YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU2Nzg5MA=='
       middleware:
         cookie:
-          # For testing purposes allow cookies without HTTPS:
+          # Only for development without HTTPS, never in production:
           secure: false
 
 Neos:
