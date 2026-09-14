@@ -13,6 +13,7 @@ namespace Flownative\OpenIdConnect\Client;
  * source code.
  */
 
+use DateTimeImmutable;
 use Flownative\OAuth2\Client\Authorization;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
@@ -196,8 +197,8 @@ class OpenIdConnectClientTest extends TestCase
         $serviceName = 'test';
         $clientId = 'the-client';
         $clientSecret = 'the-secret';
-        $scope = 'some openid';
-        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $clientSecret, $scope, []);
+        $scope = 'some';
+        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $scope, []);
 
         $expectedAccessToken = new AccessToken([
             'access_token' => Algorithms::generateRandomToken(500),
@@ -207,12 +208,81 @@ class OpenIdConnectClientTest extends TestCase
         $authorization = new Authorization($authorizationId, $serviceName, $clientId, Authorization::GRANT_CLIENT_CREDENTIALS, $scope);
         $authorization->setSerializedAccessToken(json_encode($expectedAccessToken, JSON_THROW_ON_ERROR, 512));
 
-        $this->oAuthClient->method('getAuthorization')->willReturnMap([[$authorizationId, $authorization]]);
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->method('getAuthorization')->willReturnMap([[$authorizationId, $authorization]]);
+        $oAuthClient->expects($this->never())->method('requestAccessToken');
+        $this->inject($this->oidcClient, 'oAuthClient', $oAuthClient);
 
         $actualAccessToken = $this->oidcClient->getAccessToken($serviceName, $clientId, $clientSecret, $scope);
 
         static::assertSame($expectedAccessToken->getToken(), $actualAccessToken->getToken());
         static::assertSame($expectedAccessToken->getExpires(), $actualAccessToken->getExpires());
+    }
+
+    #[Test]
+    public function getAccessTokenRequestsTokenWithTheGivenScopeOnly(): void
+    {
+        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant('test', 'the-client', 'read', ['audience' => 'https://api.example.com']);
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->method('getAuthorization')->willReturnOnConsecutiveCalls(null, self::createAuthorizationWithToken($authorizationId, time() + 3600));
+        $oAuthClient->expects($this->once())->method('requestAccessToken')->with('test', 'the-client', 'the-secret', 'read', ['audience' => 'https://api.example.com']);
+        $this->inject($this->oidcClient, 'oAuthClient', $oAuthClient);
+
+        $this->oidcClient->getAccessToken('test', 'the-client', 'the-secret', 'read', ['audience' => 'https://api.example.com']);
+    }
+
+    #[Test]
+    public function getAccessTokenRenewsTokenShortlyBeforeItExpires(): void
+    {
+        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant('test', 'the-client', 'read');
+        $renewedAuthorization = self::createAuthorizationWithToken($authorizationId, time() + 3600);
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->method('getAuthorization')->willReturnOnConsecutiveCalls(self::createAuthorizationWithToken($authorizationId, time() + 10), $renewedAuthorization);
+        $oAuthClient->expects($this->once())->method('requestAccessToken');
+        $this->inject($this->oidcClient, 'oAuthClient', $oAuthClient);
+
+        $accessToken = $this->oidcClient->getAccessToken('test', 'the-client', 'the-secret', 'read');
+
+        static::assertSame($renewedAuthorization->getAccessToken()->getToken(), $accessToken->getToken());
+    }
+
+    #[Test]
+    public function getAccessTokenUsesTokenWithoutExpirationTimeUntilItsAuthorizationExpires(): void
+    {
+        $authorization = self::createAuthorizationWithToken(Authorization::generateAuthorizationIdForClientCredentialsGrant('test', 'the-client', 'read'), null);
+        $authorization->setExpires(new DateTimeImmutable('+10 minutes'));
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->method('getAuthorization')->willReturn($authorization);
+        $oAuthClient->expects($this->never())->method('requestAccessToken');
+        $this->inject($this->oidcClient, 'oAuthClient', $oAuthClient);
+
+        $accessToken = $this->oidcClient->getAccessToken('test', 'the-client', 'the-secret', 'read');
+
+        static::assertSame($authorization->getAccessToken()->getToken(), $accessToken->getToken());
+    }
+
+    #[Test]
+    public function getAccessTokenRenewsTokenWithoutExpirationTimeWhenItsAuthorizationExpires(): void
+    {
+        $authorization = self::createAuthorizationWithToken(Authorization::generateAuthorizationIdForClientCredentialsGrant('test', 'the-client', 'read'), null);
+        $authorization->setExpires(new DateTimeImmutable('+10 seconds'));
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->method('getAuthorization')->willReturn($authorization);
+        $oAuthClient->expects($this->once())->method('requestAccessToken');
+        $this->inject($this->oidcClient, 'oAuthClient', $oAuthClient);
+
+        $this->oidcClient->getAccessToken('test', 'the-client', 'the-secret', 'read');
+    }
+
+    private static function createAuthorizationWithToken(string $authorizationId, ?int $expirationTimestamp): Authorization
+    {
+        $tokenValues = ['access_token' => Algorithms::generateRandomToken(40)];
+        if ($expirationTimestamp !== null) {
+            $tokenValues['expires'] = $expirationTimestamp;
+        }
+        $authorization = new Authorization($authorizationId, 'test', 'the-client', Authorization::GRANT_CLIENT_CREDENTIALS, 'read');
+        $authorization->setSerializedAccessToken(json_encode(new AccessToken($tokenValues), JSON_THROW_ON_ERROR));
+        return $authorization;
     }
 
     public static function authorizationScopes(): array

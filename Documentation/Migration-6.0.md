@@ -25,6 +25,7 @@ longer used.
 | [Rejected logins](#rejected-logins)                           | users can end up with a rejected login, for example with an unverified email address                            |
 | [Status 401 for scripts](#status-401-for-scripts-and-api-clients) | your frontend loads content with XHR, fetch or HTMX                                                         |
 | [Refresh tokens](#refresh-tokens)                             | your code calls `OpenIdConnectClient::refreshIdentityToken()`                                                   |
+| [Client credentials](#client-credentials)                     | your code calls `OpenIdConnectClient::getAccessToken()` with a scope                                            |
 | [Changed APIs](#changes-for-code-which-uses-the-package-directly) | your code uses classes of this package directly                                                              |
 
 ## Requirements
@@ -304,6 +305,30 @@ page, which then starts the login.
 - Refreshing no longer starts a session.
 - Refresh tokens stored by version 5 are ignored, so users log in once
   more when their identity token expires.
+
+## Client Credentials
+
+`OpenIdConnectClient::getAccessToken()` no longer adds "openid" to the
+scope, and flownative/oauth2-client 5.0 now sends the scope to the
+identity provider. Version 5 never sent the scope, so the identity
+provider issued a token with its default scope.
+
+- With an empty scope, nothing changes. The identity provider still
+  uses its default scope.
+- With a scope, the token only contains the requested rights, and the
+  identity provider rejects scopes which the client may not request.
+  Check the scopes of all calls before you upgrade. Some identity
+  providers expect a specific format, for example `{resource}/.default`
+  for Microsoft Entra ID.
+- Every application requests its tokens once more after the update,
+  because the id of the stored authorization changed.
+- A stored token is renewed 30 seconds before it expires. A token
+  without an expiration time is renewed when its authorization expires,
+  after the default token lifetime of flownative/oauth2-client. In
+  version 5, such tokens caused an exception.
+
+The migration guide of flownative/oauth2-client 5.0 explains the
+reasons for sending the scope.
 
 ## Changes for Code Which Uses the Package Directly
 

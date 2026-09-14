@@ -53,6 +53,8 @@ final class OpenIdConnectClient
     /**
      * Service name which identifies the configuration of this OpenID Connect Client instance
      */
+    private const int ACCESS_TOKEN_RENEWAL_MARGIN = 30; # seconds before expiration
+
     private string $serviceName;
 
     private array $options = [];
@@ -127,18 +129,15 @@ final class OpenIdConnectClient
     }
 
     /**
-     * Returns OAuth access token, using an OpenID Connect scope
-     *
-     * This method is used using the OAuth Client Credentials Flow for machine-to-machine applications.
-     * Therefore the grant type must be Authorization::GRANT_CLIENT_CREDENTIALS. You need to specify the
-     * client identifier and client secret and may optionally specify a scope.
+     * Returns an OAuth access token of the Client Credentials Flow for machine-to-machine applications
      *
      * This method will check if an access token already exists (stored in an Authorization record), and
-     * if it doesn't, requests one via OAuth. The authorization id which leads to the Authorization record
-     * is deterministic and derived from the service name, client id, client secret and scope.
+     * requests one via OAuth if it doesn't or if it expires soon. The authorization id which leads to the
+     * Authorization record is deterministic and derived from the service name, client id, scope and
+     * additional parameters.
      *
      * @param string $serviceName The service name used in the OAuth configuration
-     * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
+     * @param string $scope The authorization scope. Must be identifiers separated by space. With an empty scope, the identity provider uses its default scope
      * @param array $additionalParameters Additional parameters to provide in the request body while requesting the token. For example ['audience' => 'https://www.example.com/api/v1']
      * @throws AuthenticationException
      * @throws ConnectionException
@@ -148,22 +147,20 @@ final class OpenIdConnectClient
      */
     public function getAccessToken(string $serviceName, string $clientId, string $clientSecret, string $scope, array $additionalParameters = []): AccessToken
     {
-        $scope = trim(implode(' ', array_unique(array_merge(explode(' ', $scope), ['openid']))));
-
         $accessToken = null;
-        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $clientSecret, $scope, $additionalParameters);
+        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant($serviceName, $clientId, $scope, $additionalParameters);
         $authorization = $this->getAuthorization($authorizationId);
 
         if ($authorization !== null) {
             $accessToken = $authorization->getAccessToken();
             if ($accessToken === null) {
                 $this->logger?->warning(sprintf('OpenID Connect Client: Authorization %s for service "%s", clientId "%s" contained no token', $authorizationId, $serviceName, $clientId), LogEnvironment::fromMethodName(__METHOD__));
-            } elseif ($accessToken->hasExpired()) {
-                $this->logger?->info(sprintf('OpenID Connect Client: Access token contained in authorization %s for service "%s", clientId "%s" has expired', $authorizationId, $serviceName, $clientId), LogEnvironment::fromMethodName(__METHOD__));
+            } elseif ($this->expiresSoon($authorization, $accessToken)) {
+                $this->logger?->info(sprintf('OpenID Connect Client: Access token contained in authorization %s for service "%s", clientId "%s" has expired or expires soon', $authorizationId, $serviceName, $clientId), LogEnvironment::fromMethodName(__METHOD__));
             }
         }
 
-        if ($accessToken === null || $accessToken->hasExpired()) {
+        if ($authorization === null || $accessToken === null || $this->expiresSoon($authorization, $accessToken)) {
             $this->logger?->info(sprintf('OpenID Connect Client: Requesting new access token for service %s using client id %s %s', $serviceName, $clientId, ($scope ? 'requesting scope "' . $scope . '"' : 'requesting no scope')), LogEnvironment::fromMethodName(__METHOD__));
 
             $this->oAuthClient->requestAccessToken($serviceName, $clientId, $clientSecret, $scope, $additionalParameters);
@@ -177,8 +174,7 @@ final class OpenIdConnectClient
                 throw new AuthenticationException(sprintf('OpenID Connect Client: Failed retrieving access token for service "%s", clientId "%s": Authorization %s contains no token', $serviceName, $clientId, $authorizationId));
             }
         } else {
-            $expiresInSeconds = $accessToken->getExpires() - time();
-            $this->logger?->debug(sprintf('OpenID Connect Client: Using existing access token for service %s using client id %s %s. Remaining lifetime: %d seconds', $serviceName, $clientId, ($scope ? 'with scope "' . $scope . '"' : 'without a scope'), $expiresInSeconds), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->debug(sprintf('OpenID Connect Client: Using existing access token for service %s using client id %s %s', $serviceName, $clientId, ($scope ? 'with scope "' . $scope . '"' : 'without a scope')), LogEnvironment::fromMethodName(__METHOD__));
         }
 
         return $accessToken;
@@ -362,6 +358,16 @@ final class OpenIdConnectClient
      *
      * @throws ConnectionException
      */
+    /**
+     * A token which is renewed shortly before its expiration can't expire while a request uses it
+     */
+    private function expiresSoon(Authorization $authorization, AccessToken $accessToken): bool
+    {
+        // A token without an expiration time expires with its authorization, after the default token lifetime of the OAuth client
+        $expirationTimestamp = $accessToken->getExpires() ?? $authorization->getExpires()?->getTimestamp();
+        return $expirationTimestamp !== null && $expirationTimestamp <= time() + self::ACCESS_TOKEN_RENEWAL_MARGIN;
+    }
+
     private function getAuthorization(string $authorizationIdentifier): ?Authorization
     {
         try {
