@@ -124,9 +124,13 @@ created by an administrator. Microsoft Entra ID doesn't verify its
 "email" claim at all.
 
 Prefer a claim which the identity provider controls and which never
-changes for a user: "sub", or "oid" for Microsoft Entra ID. Only if your
-identity provider verifies all email addresses without sending the
-claim, disable the check:
+changes for a user: "sub", or "oid" for Microsoft Entra ID. Disable the
+check only if your identity provider verifies all email addresses
+without sending the claim, or if your application checks
+"email_verified" itself. An example for the latter is a sign-up flow
+which lets users with an unverified address in on purpose. Such an
+application must then make sure itself that unverified users don't get
+any roles:
 
 ```yaml
 providerOptions:
