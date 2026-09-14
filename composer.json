@@ -22,7 +22,8 @@
     ],
     "require": {
         "php": "8.3.* || 8.4.* || 8.5.*",
-        "neos/flow": "^9.0",
+        "neos/flow": "~8.3.13 || ~8.4.0 || ^9.0",
+        "doctrine/orm": "^2.10",
         "guzzlehttp/guzzle": "^7.9",
         "flownative/oauth2-client": "^4.1.2",
         "phpseclib/phpseclib": "^3.0.52",

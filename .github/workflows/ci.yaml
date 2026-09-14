@@ -8,7 +8,7 @@ on:
 
 jobs:
   tests:
-    name: Tests
+    name: Tests (PHP ${{ matrix.php-version }}, ${{ matrix.dependencies }}${{ matrix.flow-version != '' && format(', Flow {0}', matrix.flow-version) || '' }})
 
     runs-on: ${{ matrix.os }}
 
@@ -31,6 +31,18 @@ jobs:
           - lowest
           - highest
 
+        # Empty means the Flow version to which the dependencies resolve: 8.3 for lowest, the latest 9.x for highest
+        flow-version:
+          - ''
+
+        include:
+          - { os: ubuntu-latest, php-version: "8.3", dependencies: highest, flow-version: "~8.4.0" }
+          - { os: ubuntu-latest, php-version: "8.4", dependencies: highest, flow-version: "~8.4.0" }
+          - { os: ubuntu-latest, php-version: "8.5", dependencies: highest, flow-version: "~8.4.0" }
+          - { os: ubuntu-latest, php-version: "8.3", dependencies: lowest, flow-version: "~9.0.0" }
+          - { os: ubuntu-latest, php-version: "8.4", dependencies: lowest, flow-version: "~9.0.0" }
+          - { os: ubuntu-latest, php-version: "8.5", dependencies: lowest, flow-version: "~9.0.0" }
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,9 +63,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.COMPOSER_CACHE_DIR }}
-          key: php${{ matrix.php-version }}-composer-${{ matrix.dependencies }}-${{ hashFiles('**/composer.json') }}
+          key: php${{ matrix.php-version }}-composer-${{ matrix.dependencies }}-flow${{ matrix.flow-version }}-${{ hashFiles('**/composer.json') }}
           restore-keys: |
-            php${{ matrix.php-version }}-composer-${{ matrix.dependencies }}-
+            php${{ matrix.php-version }}-composer-${{ matrix.dependencies }}-flow${{ matrix.flow-version }}-
+
+      - name: Restrict the Flow version
+        if: matrix.flow-version != ''
+        run: composer require --no-ansi --no-interaction --no-update "neos/flow:${{ matrix.flow-version }}"
 
       - name: Install lowest dependencies with composer
         if: matrix.dependencies == 'lowest'
