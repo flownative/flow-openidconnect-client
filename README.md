@@ -105,7 +105,8 @@ identifier.
 In order to use this plugin you need:
 
 - an OIDC Identity Provider which provides auto discovery
-- an application (such as Neos), based on Flow 7.3 or higher
+- an application (such as Neos) based on Flow 8.3 (8.3.13 or later),
+  Flow 8.4 or Flow 9, running on PHP 8.3 or later
 
 ## Installation
 
