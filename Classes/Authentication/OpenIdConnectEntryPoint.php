@@ -129,7 +129,11 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
     private function createLoginFailedResponse(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
     {
         $queryParameters = Query::parse($request->getUri()->getQuery());
-        unset($queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME], $queryParameters[OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE)]);
+        unset(
+            $queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME],
+            $queryParameters[OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE)],
+            $queryParameters[OAuthClient::generateAuthorizationErrorQueryParameterName(OAuthClient::SERVICE_TYPE)]
+        );
         $retryUri = (string)$request->getUri()->withQuery(Query::build($queryParameters));
 
         $body = sprintf('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Login failed</title></head><body><h1>Login failed</h1><p>The login could not be completed. <a href="%s">Try again</a></p></body></html>', htmlentities($retryUri, ENT_QUOTES, 'utf-8'));

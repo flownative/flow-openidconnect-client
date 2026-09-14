@@ -207,6 +207,20 @@ class OpenIdConnectEntryPointTest extends TestCase
         static::assertStringContainsString('<a href="https://www.example.com/secure?page=2">Try again</a>', (string)$response->getBody());
     }
 
+    #[Test]
+    public function startAuthenticationRemovesErrorOfRefusedAuthorizationFromRetryLink(): void
+    {
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->expects($this->never())->method('startAuthorization');
+        $errorQueryParameterName = OAuthClient::generateAuthorizationErrorQueryParameterName(OAuthClient::SERVICE_TYPE);
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test']);
+
+        $response = $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure?page=2&' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=rejected&' . $errorQueryParameterName . '=access_denied'), new Response());
+
+        static::assertSame(403, $response->getStatusCode());
+        static::assertStringContainsString('<a href="https://www.example.com/secure?page=2">Try again</a>', (string)$response->getBody());
+    }
+
     public static function pendingLogins(): array
     {
         return [
