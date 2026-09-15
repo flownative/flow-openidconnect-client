@@ -57,6 +57,8 @@ final class OpenIdConnectClient
      */
     private const int ACCESS_TOKEN_RENEWAL_MARGIN = 30; # seconds before expiration
 
+    private const int MINIMUM_JWKS_RELOAD_INTERVAL = 60; # seconds
+
     private string $serviceName;
 
     private array $options = [];
@@ -280,27 +282,28 @@ final class OpenIdConnectClient
      */
     public function getJwks(): array
     {
-        $cacheIdentifier = sha1($this->options['jwksUri']);
-        $jwks = $this->jwksCache->get($cacheIdentifier);
-        if (empty($jwks)) {
-            try {
-                $response = $this->httpClient->request('GET', $this->options['jwksUri']);
-            } catch (GuzzleException $e) {
-                throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
-            }
+        $jwks = $this->jwksCache->get($this->getJwksCacheIdentifier());
+        return empty($jwks) ? $this->fetchJwks() : $jwks;
+    }
 
-            try {
-                $response = json_decode($response->getBody()->getContents(), true, 512, JSON_THROW_ON_ERROR);
-            } catch (JsonException $e) {
-                throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1739990452, $e);
-            }
-            if (!is_array($response) || !isset($response['keys'])) {
-                throw new ServiceException(sprintf('OpenID Connect Client: Invalid response data while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
-            }
-            $jwks = $response['keys'];
-            $this->jwksCache->set($cacheIdentifier, $jwks);
+    /**
+     * Retrieves the JSON Web Key Set again, although it is cached, for example because a token names a key which the cached key set doesn't contain
+     *
+     * The key set is retrieved at most once per minute, even if the request fails, so that tokens with made-up key identifiers can't
+     * flood the identity provider with requests. Within that minute, the cached key set is returned.
+     *
+     * @throws CacheException
+     * @throws ConnectionException
+     * @throws ServiceException
+     */
+    public function reloadJwks(): array
+    {
+        $reloadMarkerIdentifier = $this->getJwksCacheIdentifier() . '_reloaded';
+        if ($this->jwksCache->has($reloadMarkerIdentifier)) {
+            return $this->getJwks();
         }
-        return $jwks;
+        $this->jwksCache->set($reloadMarkerIdentifier, true, [], self::MINIMUM_JWKS_RELOAD_INTERVAL);
+        return $this->fetchJwks();
     }
 
     /**
@@ -341,6 +344,37 @@ final class OpenIdConnectClient
         }
 
         return $result;
+    }
+
+    /**
+     * @throws CacheException
+     * @throws ConnectionException
+     * @throws ServiceException
+     */
+    private function fetchJwks(): array
+    {
+        try {
+            $response = $this->httpClient->request('GET', $this->options['jwksUri']);
+        } catch (GuzzleException $e) {
+            throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
+        }
+
+        try {
+            $response = json_decode($response->getBody()->getContents(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new ServiceException(sprintf('OpenID Connect Client: Failed decoding response while retrieving JWKS from %s', $this->options['jwksUri']), 1739990452, $e);
+        }
+        if (!is_array($response) || !isset($response['keys'])) {
+            throw new ServiceException(sprintf('OpenID Connect Client: Invalid response data while retrieving JWKS from %s', $this->options['jwksUri']), 1559211340);
+        }
+        $jwks = $response['keys'];
+        $this->jwksCache->set($this->getJwksCacheIdentifier(), $jwks);
+        return $jwks;
+    }
+
+    private function getJwksCacheIdentifier(): string
+    {
+        return sha1($this->options['jwksUri']);
     }
 
     /**

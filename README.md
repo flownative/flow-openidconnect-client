@@ -744,17 +744,22 @@ a difference of 60 seconds by default. You can change it with the
 
 ### Key Rotation and Revocation
 
-The key used by the identity provider for signing JWTs should be 
-rotated regularly. This plugin retrieves valid keys from the JWKs 
-endpoint which is configured through the discovery endpoint.
+The key used by the identity provider for signing JWTs should be
+rotated regularly. This plugin retrieves valid keys from the JWKs
+endpoint which is configured through the discovery endpoint, and caches
+them.
 
 The JWKs may contain multiple public keys. That way, existing and
 not yet expired JWTs are still valid.
 
-This plugin supports multiple keys and therefore keys can be
-rotated without further action. However, if you rotate keys
-multiple times in a short time frame or if you revoked an existing
-key, you should flush the respective cache (or all caches):
+If a token names a key identifier ("kid") which the cached keys don't
+contain, the plugin retrieves the keys again, at most once per minute.
+Keys can therefore be rotated without further action. Tokens without a
+key identifier don't trigger this, so identity providers which don't
+send one may need the cache to be flushed after a rotation.
+
+If you revoked a key, flush the cache, so that tokens signed with this
+key are rejected right away:
 
 ```
    ./flow flow:cache:flushone Flownative_OpenIdConnect_Client_JWKs

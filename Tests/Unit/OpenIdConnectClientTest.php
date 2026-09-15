@@ -322,6 +322,59 @@ class OpenIdConnectClientTest extends TestCase
     }
 
     #[Test]
+    public function reloadJwksFetchesKeySetAgainAndStoresItInCache(): void
+    {
+        $jwksUri = $this->settings['services']['test']['options']['jwksUri'];
+        $reloadedJwks = [['kid' => 'the-new-key']];
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects(static::once())->method('request')->with('GET', $jwksUri)->willReturn(new Response(200, [], json_encode(['keys' => $reloadedJwks], JSON_THROW_ON_ERROR)));
+        $this->inject($this->oidcClient, 'settings', $this->settings);
+        $this->inject($this->oidcClient, 'httpClient', $httpClient);
+        $this->oidcClient->initializeObject();
+        $this->jwksCache->set(sha1($jwksUri), [['kid' => 'the-old-key']]);
+
+        static::assertSame($reloadedJwks, $this->oidcClient->reloadJwks());
+        static::assertSame($reloadedJwks, $this->oidcClient->getJwks());
+    }
+
+    #[Test]
+    public function reloadJwksFetchesKeySetOnlyOnceWithinTheMinimumInterval(): void
+    {
+        $reloadedJwks = [['kid' => 'the-new-key']];
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects(static::once())->method('request')->willReturn(new Response(200, [], json_encode(['keys' => $reloadedJwks], JSON_THROW_ON_ERROR)));
+        $this->inject($this->oidcClient, 'settings', $this->settings);
+        $this->inject($this->oidcClient, 'httpClient', $httpClient);
+        $this->oidcClient->initializeObject();
+
+        $this->oidcClient->reloadJwks();
+
+        static::assertSame($reloadedJwks, $this->oidcClient->reloadJwks());
+    }
+
+    #[Test]
+    public function reloadJwksDoesNotRepeatFailedRequestWithinTheMinimumInterval(): void
+    {
+        $jwksUri = $this->settings['services']['test']['options']['jwksUri'];
+        $cachedJwks = [['kid' => 'the-old-key']];
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects(static::once())->method('request')->willThrowException(new ConnectException('Connection refused', $this->createStub(Request::class)));
+        $this->inject($this->oidcClient, 'settings', $this->settings);
+        $this->inject($this->oidcClient, 'httpClient', $httpClient);
+        $this->oidcClient->initializeObject();
+        $this->jwksCache->set(sha1($jwksUri), $cachedJwks);
+
+        try {
+            $this->oidcClient->reloadJwks();
+            static::fail('The failed request did not throw an exception');
+        } catch (ConnectionException $exception) {
+            static::assertSame(1559211266, $exception->getCode());
+        }
+
+        static::assertSame($cachedJwks, $this->oidcClient->reloadJwks());
+    }
+
+    #[Test]
     public function getAccessTokenReturnsAccessTokenFromAuthorization(): void
     {
         $serviceName = 'test';

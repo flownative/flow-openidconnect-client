@@ -233,6 +233,70 @@ class OpenIdConnectProviderTest extends TestCase
     }
 
     #[Test]
+    public function authenticateReloadsJsonWebKeySetForTokenSignedWithUnknownKey(): void
+    {
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->once())->method('request')->with('GET', OpenIdConnectClientFixture::JWKS_URI)->willReturn(self::createJwksResponse(JwtFixture::KEY_IDENTIFIER, JwtFixture::ROTATED_KEY_IDENTIFIER));
+        $token = self::createTokenForBearerJwt(self::createJwt(keyIdentifier: JwtFixture::ROTATED_KEY_IDENTIFIER));
+
+        $this->createProvider(['roles' => ['Some.Package:User']], httpClient: $httpClient)->authenticate($token);
+
+        static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+    }
+
+    #[Test]
+    public function authenticateDoesNotReloadJsonWebKeySetForTokenWithInvalidSignatureOfKnownKey(): void
+    {
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->never())->method('request');
+        $token = self::createTokenForBearerJwt(self::createJwtWithInvalidSignature(['sub' => 'mallory']));
+
+        $this->createProvider(['roles' => ['Some.Package:User']], httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
+    }
+
+    #[Test]
+    public function authenticateRejectsTokenSignedWithKeyWhichTheReloadedJsonWebKeySetDoesNotContain(): void
+    {
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(self::createJwksResponse(JwtFixture::KEY_IDENTIFIER));
+        $token = self::createTokenForBearerJwt(self::createJwt(keyIdentifier: JwtFixture::ROTATED_KEY_IDENTIFIER));
+
+        $this->createProvider(['roles' => ['Some.Package:User']], httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
+    }
+
+    #[Test]
+    public function authenticateRejectsTokenSignedWithUnknownKeyIfJsonWebKeySetCannotBeReloaded(): void
+    {
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willThrowException(new ConnectException('Connection refused', new Request('GET', OpenIdConnectClientFixture::JWKS_URI)));
+        $token = self::createTokenForBearerJwt(self::createJwt(keyIdentifier: JwtFixture::ROTATED_KEY_IDENTIFIER));
+
+        $this->createProvider(['roles' => ['Some.Package:User']], httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
+    }
+
+    #[Test]
+    public function authenticateReloadsJsonWebKeySetForRefreshedTokenSignedWithUnknownKey(): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $refreshedJwt = self::createJwt(keyIdentifier: JwtFixture::ROTATED_KEY_IDENTIFIER);
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturnCallback(static fn (string $method, mixed $uri): Response => (string)$uri === OpenIdConnectClientFixture::JWKS_URI
+            ? self::createJwksResponse(JwtFixture::KEY_IDENTIFIER, JwtFixture::ROTATED_KEY_IDENTIFIER)
+            : new Response(200, [], json_encode(['id_token' => $refreshedJwt], JSON_THROW_ON_ERROR)));
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
+
+        static::assertSame($refreshedJwt, $token->getAccount()?->getCredentialsSource());
+    }
+
+    #[Test]
     public function authenticateDoesNotAuthenticateIfJsonWebKeySetCannotBeRetrieved(): void
     {
         $httpClient = $this->createStub(HttpClient::class);
@@ -1058,7 +1122,7 @@ class OpenIdConnectProviderTest extends TestCase
     /**
      * Creates a signed JWT with valid default claims; claims set to null are left out
      */
-    private static function createJwt(array $claims = []): string
+    private static function createJwt(array $claims = [], string $keyIdentifier = JwtFixture::KEY_IDENTIFIER): string
     {
         $defaultClaims = [
             'iss' => OpenIdConnectClientFixture::ISSUER,
@@ -1066,7 +1130,12 @@ class OpenIdConnectProviderTest extends TestCase
             'sub' => 'alice',
             'exp' => time() + 3600,
         ];
-        return JwtFixture::createSignedJwt(array_filter(array_merge($defaultClaims, $claims), static fn (mixed $value): bool => $value !== null));
+        return JwtFixture::createSignedJwt(array_filter(array_merge($defaultClaims, $claims), static fn (mixed $value): bool => $value !== null), $keyIdentifier);
+    }
+
+    private static function createJwksResponse(string ...$keyIdentifiers): Response
+    {
+        return new Response(200, [], json_encode(['keys' => JwtFixture::createJwks(...$keyIdentifiers)], JSON_THROW_ON_ERROR));
     }
 
     private static function createJwtWithInvalidSignature(array $claims): string

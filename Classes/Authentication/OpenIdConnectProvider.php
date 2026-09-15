@@ -121,9 +121,10 @@ final class OpenIdConnectProvider extends AbstractProvider
         }
 
         try {
-            // Creating the client may already contact the identity provider for discovery.
+            // Creating the client may already contact the identity provider for discovery. Loading the key set here keeps an unreachable
+            // identity provider from counting as wrong credentials.
             $client = $this->openIdConnectClientFactory->create($this->options['serviceName']);
-            $jwks = $client->getJwks();
+            $client->getJwks();
         } catch (ConnectionException|ServiceException $exception) {
             $this->logger?->error(sprintf('OpenID Connect: Could not retrieve the configuration or the JSON Web Key Set of service "%s": %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return;
@@ -131,7 +132,7 @@ final class OpenIdConnectProvider extends AbstractProvider
 
         $now = new DateTimeImmutable();
         $validationTime = $now->add($leewayInterval);
-        if (!$this->verifySignature($identityToken, $jwks) || !$this->hasAcceptableClaims($identityToken, $client->getOptions(), $validationTime)) {
+        if (!$this->verifySignature($identityToken, $client) || !$this->hasAcceptableClaims($identityToken, $client->getOptions(), $validationTime)) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
             return;
         }
@@ -146,7 +147,7 @@ final class OpenIdConnectProvider extends AbstractProvider
             $refreshedTokenSet = $storedRefreshToken !== null ? $this->refreshExpiredIdentityToken($identityToken, $storedRefreshToken, $client, $now) : null;
             if ($storedRefreshToken !== null && $refreshedTokenSet !== null) {
                 $refreshedIdentityToken = $refreshedTokenSet->identityToken;
-                if (!$this->verifySignature($refreshedIdentityToken, $jwks) || !$this->hasAcceptableClaims($refreshedIdentityToken, $client->getOptions(), $validationTime) || !$this->isRefreshOf($refreshedIdentityToken, $identityToken)) {
+                if (!$this->verifySignature($refreshedIdentityToken, $client) || !$this->hasAcceptableClaims($refreshedIdentityToken, $client->getOptions(), $validationTime) || !$this->isRefreshOf($refreshedIdentityToken, $identityToken)) {
                     $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
                     return;
                 }
@@ -187,15 +188,21 @@ final class OpenIdConnectProvider extends AbstractProvider
     {
     }
 
-    private function verifySignature(IdentityToken $identityToken, array $jwks): bool
+    private function verifySignature(IdentityToken $identityToken, OpenIdConnectClient $client): bool
     {
         try {
+            $jwks = $client->getJwks();
+            if ($identityToken->hasUnknownKeyIdentifier($jwks)) {
+                $jwks = $client->reloadJwks();
+            }
             if ($identityToken->hasValidSignature($jwks)) {
                 return true;
             }
             $this->logger?->notice('OpenID Connect: The identity token has an invalid signature', LogEnvironment::fromMethodName(__METHOD__));
         } catch (ServiceException $exception) {
             $this->logger?->notice(sprintf('OpenID Connect: Could not verify the signature of the identity token: %s', $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+        } catch (ConnectionException $exception) {
+            $this->logger?->error(sprintf('OpenID Connect: Could not reload the JSON Web Key Set of service "%s" for a token which names an unknown key: %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
         }
         return false;
     }

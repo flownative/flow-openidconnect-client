@@ -19,19 +19,23 @@ use phpseclib3\Crypt\RSA\PrivateKey;
 /**
  * Creates RS256-signed JWTs and the matching JSON Web Key Set for unit tests
  *
- * The key pair is generated once per test run.
+ * Each key pair is generated once per test run.
  */
 final class JwtFixture
 {
     public const string KEY_IDENTIFIER = 'key-1';
+    public const string ROTATED_KEY_IDENTIFIER = 'key-2'; # a key which the identity provider published after the key set was cached
 
-    private static ?PrivateKey $signingKey = null;
+    /**
+     * @var array<string, PrivateKey>
+     */
+    private static array $signingKeys = [];
 
-    public static function createSignedJwt(array $claims): string
+    public static function createSignedJwt(array $claims, string $keyIdentifier = self::KEY_IDENTIFIER): string
     {
-        $header = self::base64UrlEncode(json_encode(['typ' => 'JWT', 'alg' => 'RS256', 'kid' => self::KEY_IDENTIFIER], JSON_THROW_ON_ERROR));
+        $header = self::base64UrlEncode(json_encode(['typ' => 'JWT', 'alg' => 'RS256', 'kid' => $keyIdentifier], JSON_THROW_ON_ERROR));
         $payload = self::base64UrlEncode(json_encode($claims, JSON_THROW_ON_ERROR));
-        $signature = self::signingKey()
+        $signature = self::signingKey($keyIdentifier)
             ->withHash('sha256')
             ->withPadding(RSA::SIGNATURE_PKCS1)
             ->sign($header . '.' . $payload);
@@ -39,15 +43,19 @@ final class JwtFixture
         return $header . '.' . $payload . '.' . self::base64UrlEncode($signature);
     }
 
-    public static function createJwks(): array
+    public static function createJwks(string ...$keyIdentifiers): array
     {
-        $jwks = json_decode(self::signingKey()->getPublicKey()->toString('JWK'), true, 512, JSON_THROW_ON_ERROR);
-        return [array_merge($jwks['keys'][0], ['kid' => self::KEY_IDENTIFIER, 'use' => 'sig', 'alg' => 'RS256'])];
+        $jwks = [];
+        foreach ($keyIdentifiers === [] ? [self::KEY_IDENTIFIER] : $keyIdentifiers as $keyIdentifier) {
+            $publicKey = json_decode(self::signingKey($keyIdentifier)->getPublicKey()->toString('JWK'), true, 512, JSON_THROW_ON_ERROR);
+            $jwks[] = array_merge($publicKey['keys'][0], ['kid' => $keyIdentifier, 'use' => 'sig', 'alg' => 'RS256']);
+        }
+        return $jwks;
     }
 
-    private static function signingKey(): PrivateKey
+    private static function signingKey(string $keyIdentifier): PrivateKey
     {
-        return self::$signingKey ??= RSA::createKey(2048);
+        return self::$signingKeys[$keyIdentifier] ??= RSA::createKey(2048);
     }
 
     private static function base64UrlEncode(string $data): string
