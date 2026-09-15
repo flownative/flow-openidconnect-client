@@ -128,22 +128,24 @@ final class OpenIdConnectProvider extends AbstractProvider
         try {
             // Creating the client may already contact the identity provider for discovery.
             $client = $this->openIdConnectClientFactory->create($this->options['serviceName']);
-            $jwks = $client->getJwks();
         } catch (ConnectionException|ServiceException $exception) {
-            $this->logger?->error(sprintf('OpenID Connect: Could not retrieve the configuration or the JSON Web Key Set of service "%s": %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+            $this->logger?->error(sprintf('OpenID Connect: Could not retrieve the configuration of service "%s": %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return;
         }
 
         $requirements = $this->createIdentityTokenRequirements($client->getOptions(), $leeway);
         $now = new DateTimeImmutable();
         try {
-            $validatedIdentityToken = $this->identityTokenValidator->validate($identityToken, $jwks, $requirements, $now);
+            $validatedIdentityToken = $this->identityTokenValidator->validate($identityToken, $client, $requirements, $now);
         } catch (ExpiredIdentityTokenException) {
             // All other checks passed, so the token may still be refreshed
             $validatedIdentityToken = null;
         } catch (IdentityTokenRejectedException $exception) {
             $this->logRejectedIdentityToken($exception);
             $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
+            return;
+        } catch (ConnectionException|ServiceException $exception) {
+            $this->logUnavailableJwks($exception);
             return;
         }
 
@@ -157,12 +159,15 @@ final class OpenIdConnectProvider extends AbstractProvider
             $refreshedTokenSet = $storedRefreshToken !== null ? $this->refreshExpiredIdentityToken($identityToken, $storedRefreshToken, $client, $now) : null;
             if ($refreshedTokenSet !== null) {
                 try {
-                    $validatedRefreshedIdentityToken = $this->identityTokenValidator->validate($refreshedTokenSet->identityToken, $jwks, $requirements, $now);
+                    $validatedRefreshedIdentityToken = $this->identityTokenValidator->validate($refreshedTokenSet->identityToken, $client, $requirements, $now);
                 } catch (ExpiredIdentityTokenException) {
                     $validatedRefreshedIdentityToken = null;
                 } catch (IdentityTokenRejectedException $exception) {
                     $this->logRejectedIdentityToken($exception);
                     $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
+                    return;
+                } catch (ConnectionException|ServiceException $exception) {
+                    $this->logUnavailableJwks($exception);
                     return;
                 }
                 if (!$this->isRefreshOf($refreshedTokenSet->identityToken, $identityToken)) {
@@ -399,6 +404,14 @@ final class OpenIdConnectProvider extends AbstractProvider
             return [];
         }
         return array_values(array_filter($value, static fn (mixed $item): bool => is_string($item) && $item !== ''));
+    }
+
+    /**
+     * An identity provider which can't be reached proves nothing about the token, so the token doesn't count as wrong credentials
+     */
+    private function logUnavailableJwks(ConnectionException|ServiceException $exception): void
+    {
+        $this->logger?->error(sprintf('OpenID Connect: Could not retrieve the JSON Web Key Set of service "%s": %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
     }
 
     private function logRejectedIdentityToken(IdentityTokenRejectedException $exception): void

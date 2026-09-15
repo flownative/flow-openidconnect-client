@@ -15,9 +15,15 @@ namespace Flownative\OpenIdConnect\Client;
 
 use DateTimeImmutable;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\JwtFixture;
+use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\OpenIdConnectClientFixture;
+use GuzzleHttp\Client as HttpClient;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 
 class IdentityTokenValidatorTest extends TestCase
 {
@@ -30,7 +36,7 @@ class IdentityTokenValidatorTest extends TestCase
     {
         $identityToken = self::createIdentityToken();
 
-        $validatedIdentityToken = (new IdentityTokenValidator())->validate($identityToken, JwtFixture::createJwks(), self::createRequirements(), self::now());
+        $validatedIdentityToken = (new IdentityTokenValidator())->validate($identityToken, $this->createClient(), self::createRequirements(), self::now());
 
         static::assertSame($identityToken, $validatedIdentityToken->identityToken);
         static::assertSame('alice', $validatedIdentityToken->accountIdentifier);
@@ -64,7 +70,7 @@ class IdentityTokenValidatorTest extends TestCase
     {
         $this->expectException(IdentityTokenRejectedException::class);
         $this->expectExceptionCode($expectedExceptionCode);
-        (new IdentityTokenValidator())->validate(self::createIdentityToken($claims), JwtFixture::createJwks(), self::createRequirements(...$requirements), self::now());
+        (new IdentityTokenValidator())->validate(self::createIdentityToken($claims), $this->createClient(), self::createRequirements(...$requirements), self::now());
     }
 
     public static function acceptedTokens(): array
@@ -88,7 +94,7 @@ class IdentityTokenValidatorTest extends TestCase
     #[DataProvider('acceptedTokens')]
     public function validateAcceptsTokenWhichPassesAllChecks(array $claims, array $requirements): void
     {
-        $validatedIdentityToken = (new IdentityTokenValidator())->validate(self::createIdentityToken($claims), JwtFixture::createJwks(), self::createRequirements(...$requirements), self::now());
+        $validatedIdentityToken = (new IdentityTokenValidator())->validate(self::createIdentityToken($claims), $this->createClient(), self::createRequirements(...$requirements), self::now());
 
         static::assertNotSame('', $validatedIdentityToken->accountIdentifier);
     }
@@ -100,7 +106,7 @@ class IdentityTokenValidatorTest extends TestCase
         $this->expectExceptionCode(1791540862);
         (new IdentityTokenValidator())->validate(
             self::createIdentityToken(['iss' => 'https://login.example.com/../v2.0', 'tid' => '..']),
-            JwtFixture::createJwks(),
+            $this->createClient(),
             self::createRequirements(issuers: ['https://login.example.com/{tenantid}/v2.0']),
             self::now()
         );
@@ -114,7 +120,7 @@ class IdentityTokenValidatorTest extends TestCase
 
         $this->expectException(IdentityTokenRejectedException::class);
         $this->expectExceptionCode(1791540861);
-        (new IdentityTokenValidator())->validate(IdentityToken::fromJwt($header . '.' . $forgedClaims . '.' . $signature), JwtFixture::createJwks(), self::createRequirements(), self::now());
+        (new IdentityTokenValidator())->validate(IdentityToken::fromJwt($header . '.' . $forgedClaims . '.' . $signature), $this->createClient(), self::createRequirements(), self::now());
     }
 
     #[Test]
@@ -122,7 +128,43 @@ class IdentityTokenValidatorTest extends TestCase
     {
         $this->expectException(IdentityTokenRejectedException::class);
         $this->expectExceptionCode(1791540860);
-        (new IdentityTokenValidator())->validate(self::createIdentityToken(), [], self::createRequirements(), self::now());
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(self::createJwksResponse(JwtFixture::ROTATED_KEY_IDENTIFIER));
+        (new IdentityTokenValidator())->validate(self::createIdentityToken(), $this->createClient(JwtFixture::createJwks(JwtFixture::ROTATED_KEY_IDENTIFIER), $httpClient), self::createRequirements(), self::now());
+    }
+
+    #[Test]
+    public function validateReloadsKeySetForTokenOfExpectedIssuerSignedWithUnknownKey(): void
+    {
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->once())->method('request')->with('GET', OpenIdConnectClientFixture::JWKS_URI)->willReturn(self::createJwksResponse(JwtFixture::KEY_IDENTIFIER, JwtFixture::ROTATED_KEY_IDENTIFIER));
+        $identityToken = IdentityToken::fromJwt(JwtFixture::createSignedJwt(self::createClaims([]), JwtFixture::ROTATED_KEY_IDENTIFIER));
+
+        $validatedIdentityToken = (new IdentityTokenValidator())->validate($identityToken, $this->createClient(httpClient: $httpClient), self::createRequirements(), self::now());
+
+        static::assertSame('alice', $validatedIdentityToken->accountIdentifier);
+    }
+
+    #[Test]
+    public function validateDoesNotReloadKeySetForTokenOfAnotherIssuer(): void
+    {
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->never())->method('request');
+        $identityToken = IdentityToken::fromJwt(JwtFixture::createSignedJwt(self::createClaims(['iss' => 'https://evil.example.com/']), JwtFixture::ROTATED_KEY_IDENTIFIER));
+
+        $this->expectException(IdentityTokenRejectedException::class);
+        (new IdentityTokenValidator())->validate($identityToken, $this->createClient(httpClient: $httpClient), self::createRequirements(), self::now());
+    }
+
+    #[Test]
+    public function validateReportsKeySetWhichCannotBeReloaded(): void
+    {
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willThrowException(new ConnectException('Connection refused', new Request('GET', OpenIdConnectClientFixture::JWKS_URI)));
+        $identityToken = IdentityToken::fromJwt(JwtFixture::createSignedJwt(self::createClaims([]), JwtFixture::ROTATED_KEY_IDENTIFIER));
+
+        $this->expectException(ConnectionException::class);
+        (new IdentityTokenValidator())->validate($identityToken, $this->createClient(httpClient: $httpClient), self::createRequirements(), self::now());
     }
 
     #[Test]
@@ -130,21 +172,21 @@ class IdentityTokenValidatorTest extends TestCase
     {
         $this->expectException(ExpiredIdentityTokenException::class);
         $this->expectExceptionCode(1791540868);
-        (new IdentityTokenValidator())->validate(self::createIdentityToken(['exp' => self::NOW - 120]), JwtFixture::createJwks(), self::createRequirements(), self::now());
+        (new IdentityTokenValidator())->validate(self::createIdentityToken(['exp' => self::NOW - 120]), $this->createClient(), self::createRequirements(), self::now());
     }
 
     #[Test]
     public function validateReportsTokenWithoutExpirationTimeAsExpired(): void
     {
         $this->expectException(ExpiredIdentityTokenException::class);
-        (new IdentityTokenValidator())->validate(self::createIdentityToken(['exp' => null]), JwtFixture::createJwks(), self::createRequirements(), self::now());
+        (new IdentityTokenValidator())->validate(self::createIdentityToken(['exp' => null]), $this->createClient(), self::createRequirements(), self::now());
     }
 
     #[Test]
     public function validateRejectsExpiredTokenWhichFailsAnotherCheckWithoutReportingItAsExpired(): void
     {
         try {
-            (new IdentityTokenValidator())->validate(self::createIdentityToken(['exp' => self::NOW - 120, 'aud' => 'other-client']), JwtFixture::createJwks(), self::createRequirements(), self::now());
+            (new IdentityTokenValidator())->validate(self::createIdentityToken(['exp' => self::NOW - 120, 'aud' => 'other-client']), $this->createClient(), self::createRequirements(), self::now());
             static::fail('The token was not rejected');
         } catch (IdentityTokenRejectedException $exception) {
             static::assertNotInstanceOf(ExpiredIdentityTokenException::class, $exception);
@@ -156,14 +198,14 @@ class IdentityTokenValidatorTest extends TestCase
     public function validateUsesConfiguredLeeway(): void
     {
         $this->expectException(ExpiredIdentityTokenException::class);
-        (new IdentityTokenValidator())->validate(self::createIdentityToken(['exp' => self::NOW - 30]), JwtFixture::createJwks(), self::createRequirements(leeway: 10), self::now());
+        (new IdentityTokenValidator())->validate(self::createIdentityToken(['exp' => self::NOW - 30]), $this->createClient(), self::createRequirements(leeway: 10), self::now());
     }
 
     #[Test]
     public function validateEscapesTokenValuesInMessages(): void
     {
         try {
-            (new IdentityTokenValidator())->validate(self::createIdentityToken(['iss' => "evil\nissuer"]), JwtFixture::createJwks(), self::createRequirements(), self::now());
+            (new IdentityTokenValidator())->validate(self::createIdentityToken(['iss' => "evil\nissuer"]), $this->createClient(), self::createRequirements(), self::now());
             static::fail('The token was not rejected');
         } catch (IdentityTokenRejectedException $exception) {
             static::assertStringNotContainsString("\n", $exception->getMessage());
@@ -197,6 +239,16 @@ class IdentityTokenValidatorTest extends TestCase
         ?string $nonce = null,
     ): IdentityTokenRequirements {
         return new IdentityTokenRequirements($issuers, $audiences, $authorizedParty, $accountIdentifierClaimName, $requireVerifiedEmail, $leeway, $nonce);
+    }
+
+    private function createClient(?array $jwks = null, ?HttpClient $httpClient = null): OpenIdConnectClient
+    {
+        return OpenIdConnectClientFixture::createClient($this->createStub(OAuthClient::class), OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class), $jwks ?? JwtFixture::createJwks(), $httpClient);
+    }
+
+    private static function createJwksResponse(string ...$keyIdentifiers): Response
+    {
+        return new Response(200, [], json_encode(['keys' => JwtFixture::createJwks(...$keyIdentifiers)], JSON_THROW_ON_ERROR));
     }
 
     private static function now(): DateTimeImmutable
