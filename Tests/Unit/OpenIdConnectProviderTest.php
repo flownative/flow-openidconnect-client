@@ -13,6 +13,7 @@ namespace Flownative\OpenIdConnect\Client;
  * source code.
  */
 
+use ArrayObject;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\StoredRefreshToken;
@@ -39,6 +40,8 @@ use RuntimeException;
 
 class OpenIdConnectProviderTest extends TestCase
 {
+    private const string SESSION_KEY = 'flownative_oidc_refresh:SomeProvider';
+
     #[Test]
     public function getTokenClassNamesReturnsOpenIdConnectToken(): void
     {
@@ -531,24 +534,142 @@ class OpenIdConnectProviderTest extends TestCase
         }
         $httpClient = $this->createStub(HttpClient::class);
         $httpClient->method('request')->willReturn(new Response(200, [], json_encode($responseData)));
-        $storedSessionData = null;
-        $session = $this->createMock(SessionInterface::class);
-        $session->method('isStarted')->willReturn(true);
-        $session->method('getData')->willReturnMap([['flownative_oidc_refresh:SomeProvider', self::createStoredRefreshToken('the-refresh-token', $expiredJwt)]]);
-        $session->expects($this->once())->method('putData')->with('flownative_oidc_refresh:SomeProvider', $this->anything())->willReturnCallback(
-            static function (string $key, mixed $sessionData) use (&$storedSessionData): void {
-                $storedSessionData = $sessionData;
-            }
-        );
+        $sessionData = new ArrayObject([self::SESSION_KEY => self::createStoredRefreshToken('the-refresh-token', $expiredJwt)]);
+        $sessionWrites = new ArrayObject();
+        // Without parallel requests, the refreshed identity token is stored once and confirmed without a warning
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->never())->method('warning');
         $token = self::createTokenForCookieJwt($expiredJwt);
 
-        $this->createProvider(['roles' => ['Some.Package:User']], session: $session, httpClient: $httpClient)->authenticate($token);
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSessionForData($sessionData, $sessionWrites), httpClient: $httpClient, logger: $logger)->authenticate($token);
 
-        $storedRefreshToken = StoredRefreshToken::fromSessionData($storedSessionData);
+        $storedRefreshToken = StoredRefreshToken::fromSessionData($sessionData[self::SESSION_KEY]);
         static::assertSame(TokenInterface::AUTHENTICATION_SUCCESSFUL, $token->getAuthenticationStatus());
+        static::assertCount(1, $sessionWrites);
         static::assertSame($expectedRefreshToken, $storedRefreshToken->refreshToken);
         static::assertTrue($storedRefreshToken->isBoundTo(IdentityToken::fromJwt($refreshedJwt)));
         static::assertTrue($storedRefreshToken->hasRecentlyReplaced(IdentityToken::fromJwt($expiredJwt), time()));
+    }
+
+    #[Test]
+    public function authenticateKeepsIdentityTokensOfParallelRefreshesInTheSession(): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $jwtOfFirstRequest = self::createJwt(['jti' => 'first']);
+        $jwtOfSecondRequest = self::createJwt(['jti' => 'second']);
+        $sessionData = new ArrayObject([self::SESSION_KEY => self::createStoredRefreshToken('the-refresh-token', $expiredJwt)]);
+
+        $httpClientOfSecondRequest = $this->createStub(HttpClient::class);
+        $httpClientOfSecondRequest->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => $jwtOfSecondRequest, 'refresh_token' => 'the-refresh-token-of-the-second-request'])));
+        $providerOfSecondRequest = $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSessionForData($sessionData), httpClient: $httpClientOfSecondRequest);
+        $tokenOfSecondRequest = self::createTokenForCookieJwt($expiredJwt);
+
+        $httpClientOfFirstRequest = $this->createStub(HttpClient::class);
+        $httpClientOfFirstRequest->method('request')->willReturnCallback(static function () use ($providerOfSecondRequest, $tokenOfSecondRequest, $jwtOfFirstRequest): Response {
+            // The second request refreshes the same identity token while the first request waits for the identity provider
+            $providerOfSecondRequest->authenticate($tokenOfSecondRequest);
+            return new Response(200, [], json_encode(['id_token' => $jwtOfFirstRequest, 'refresh_token' => 'the-refresh-token-of-the-first-request']));
+        });
+        $tokenOfFirstRequest = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSessionForData($sessionData), httpClient: $httpClientOfFirstRequest)->authenticate($tokenOfFirstRequest);
+
+        static::assertSame($jwtOfFirstRequest, $tokenOfFirstRequest->getAccount()?->getCredentialsSource());
+        static::assertSame($jwtOfSecondRequest, $tokenOfSecondRequest->getAccount()?->getCredentialsSource());
+        $storedRefreshToken = StoredRefreshToken::fromSessionData($sessionData[self::SESSION_KEY]);
+        static::assertTrue($storedRefreshToken->isBoundTo(IdentityToken::fromJwt($jwtOfFirstRequest)));
+        static::assertTrue($storedRefreshToken->isBoundTo(IdentityToken::fromJwt($jwtOfSecondRequest)));
+        static::assertTrue($storedRefreshToken->hasRecentlyReplaced(IdentityToken::fromJwt($expiredJwt), time()));
+        static::assertSame('the-refresh-token-of-the-first-request', $storedRefreshToken->refreshToken);
+    }
+
+    #[Test]
+    public function authenticateRefreshesIdentityTokenOfCurrentGenerationWhichWasNotIssuedLast(): void
+    {
+        $firstJwtOfGeneration = self::createJwt(['exp' => time() - 600, 'jti' => 'first']);
+        $lastJwtOfGeneration = self::createJwt(['exp' => time() - 600, 'jti' => 'last']);
+        $refreshedJwt = self::createJwt();
+        $sessionData = new ArrayObject([
+            self::SESSION_KEY => StoredRefreshToken::forLogin('the-refresh-token', IdentityToken::fromJwt(self::createJwt(['exp' => time() - 4200])))
+                ->withRefreshedIdentityToken(IdentityToken::fromJwt($firstJwtOfGeneration), '', time() - 3600)
+                ->withIdentityTokenOfParallelRefresh(IdentityToken::fromJwt($lastJwtOfGeneration), '')
+                ->toSessionData()
+        ]);
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->once())->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => $refreshedJwt])));
+        $token = self::createTokenForCookieJwt($firstJwtOfGeneration);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSessionForData($sessionData), httpClient: $httpClient)->authenticate($token);
+
+        static::assertSame($refreshedJwt, $token->getAccount()?->getCredentialsSource());
+        $storedRefreshToken = StoredRefreshToken::fromSessionData($sessionData[self::SESSION_KEY]);
+        static::assertTrue($storedRefreshToken->isBoundTo(IdentityToken::fromJwt($refreshedJwt)));
+        static::assertTrue($storedRefreshToken->hasRecentlyReplaced(IdentityToken::fromJwt($lastJwtOfGeneration), time()));
+    }
+
+    public static function replacementsAfterStoring(): array
+    {
+        return [
+            'replaced once' => [1, true],
+            'replaced until the last attempt' => [2, true],
+            'replaced after each attempt' => [PHP_INT_MAX, false],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('replacementsAfterStoring')]
+    public function authenticateStoresRefreshedIdentityTokenAgainIfParallelRequestReplacedIt(int $numberOfReplacements, bool $expectedToBeStored): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $refreshedJwt = self::createJwt(['jti' => 'this-request']);
+        $sessionDataOfParallelRequest = StoredRefreshToken::forLogin('the-refresh-token', IdentityToken::fromJwt($expiredJwt))
+            ->withRefreshedIdentityToken(IdentityToken::fromJwt(self::createJwt(['jti' => 'parallel-request'])), '', time())
+            ->toSessionData();
+        $sessionData = new ArrayObject([self::SESSION_KEY => self::createStoredRefreshToken('the-refresh-token', $expiredJwt)]);
+        $session = $this->createStub(SessionInterface::class);
+        $session->method('isStarted')->willReturn(true);
+        $session->method('getData')->willReturnCallback(static fn (string $key): mixed => $sessionData[$key] ?? null);
+        $session->method('putData')->willReturnCallback(static function (string $key, mixed $data) use ($sessionData, $sessionDataOfParallelRequest, &$numberOfReplacements): void {
+            // A parallel request overwrites the session data right after this request stored it
+            $sessionData[$key] = $numberOfReplacements-- > 0 ? $sessionDataOfParallelRequest : $data;
+        });
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => $refreshedJwt])));
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($expectedToBeStored ? $this->never() : $this->once())->method('warning');
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $session, httpClient: $httpClient, logger: $logger)->authenticate($token);
+
+        static::assertSame($refreshedJwt, $token->getAccount()?->getCredentialsSource());
+        static::assertSame($expectedToBeStored, StoredRefreshToken::fromSessionData($sessionData[self::SESSION_KEY])->isBoundTo(IdentityToken::fromJwt($refreshedJwt)));
+    }
+
+    public static function sessionChangesDuringRefresh(): array
+    {
+        return [
+            'logout' => [null],
+            'another login' => [self::createStoredRefreshToken('the-refresh-token-of-another-login', self::createJwt(['jti' => 'another-login']))],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('sessionChangesDuringRefresh')]
+    public function authenticateDiscardsRefreshedIdentityTokenIfSessionChangedDuringRefresh(?array $sessionDataAfterChange): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $sessionData = new ArrayObject([self::SESSION_KEY => self::createStoredRefreshToken('the-refresh-token', $expiredJwt)]);
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturnCallback(static function () use ($sessionData, $sessionDataAfterChange): Response {
+            $sessionData[self::SESSION_KEY] = $sessionDataAfterChange;
+            return new Response(200, [], json_encode(['id_token' => self::createJwt(), 'refresh_token' => 'the-rotated-refresh-token']));
+        });
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSessionForData($sessionData), httpClient: $httpClient)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::AUTHENTICATION_NEEDED);
+        static::assertSame($sessionDataAfterChange, $sessionData[self::SESSION_KEY]);
     }
 
     public static function storedRefreshTokensNotBoundToTheIdentityToken(): array
@@ -914,9 +1035,23 @@ class OpenIdConnectProviderTest extends TestCase
 
     private function createSession(array|string|null $storedRefreshToken): SessionInterface
     {
+        return $this->createSessionForData(new ArrayObject([self::SESSION_KEY => $storedRefreshToken]));
+    }
+
+    /**
+     * Creates a started session which reads and writes the given data, so that several providers can share it like parallel requests
+     *
+     * @param ArrayObject|null $sessionWrites Receives the data of each write, in the order of the writes
+     */
+    private function createSessionForData(ArrayObject $sessionData, ?ArrayObject $sessionWrites = null): SessionInterface
+    {
         $session = $this->createStub(SessionInterface::class);
         $session->method('isStarted')->willReturn(true);
-        $session->method('getData')->willReturnMap([['flownative_oidc_refresh:SomeProvider', $storedRefreshToken]]);
+        $session->method('getData')->willReturnCallback(static fn (string $key): mixed => $sessionData[$key] ?? null);
+        $session->method('putData')->willReturnCallback(static function (string $key, mixed $data) use ($sessionData, $sessionWrites): void {
+            $sessionData[$key] = $data;
+            $sessionWrites?->append($data);
+        });
         return $session;
     }
 

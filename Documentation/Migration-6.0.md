@@ -300,10 +300,12 @@ page, which then starts the login.
 - After a login, the session gets a new identifier.
 - Each authentication provider keeps its refresh token under its own key
   in the session.
-- The refresh token is bound to the identity token which was issued
-  last, and only this identity token is refreshed. For ten minutes
-  after a refresh, requests which still carry the previous identity
-  token receive the refreshed one from the session.
+- The refresh token is bound to the identity tokens which were issued
+  last for the session, and only these identity tokens are refreshed.
+  Several parallel requests may refresh the same identity token, and
+  each identity token they receive can be refreshed later. For ten
+  minutes after a refresh, requests which still carry a previous
+  identity token receive the refreshed one from the session.
 - A refreshed identity token must have the same issuer and subject as
   the expired one.
 - If the identity provider rotates refresh tokens, the new refresh token
@@ -363,4 +365,6 @@ update:
 | "contains no nonce"                           | the identity provider didn't return the nonce of the login                          |
 | "not started in this browser"                 | the nonce cookie is missing, for example because the login ran in a cross-site iframe |
 | "belongs to another identity token"           | the session holds a refresh token for another identity token, so nothing is refreshed |
+| "no longer holds the refresh token"           | the session was logged out or logged in again while a request refreshed its identity token |
+| "kept replacing it"                           | parallel requests replaced a refreshed identity token in the session, so it may not be refreshable later |
 | "was rejected when the browser returned"      | the entry point showed the "Login failed" page instead of starting another login     |

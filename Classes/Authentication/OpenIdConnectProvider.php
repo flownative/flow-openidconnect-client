@@ -48,6 +48,11 @@ final class OpenIdConnectProvider extends AbstractProvider
 
     private const string REFRESH_TOKEN_SESSION_KEY_PREFIX = 'flownative_oidc_refresh:';
 
+    /**
+     * How often a refreshed identity token is stored at most, if parallel requests keep replacing it in the session right after it was stored
+     */
+    private const int MAXIMUM_STORE_ATTEMPTS = 3;
+
     #[Flow\Inject]
     protected PolicyService $policyService;
 
@@ -145,11 +150,9 @@ final class OpenIdConnectProvider extends AbstractProvider
                     $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
                     return;
                 }
-                // The session already holds a refreshed identity token which a parallel request received a short while ago
-                if (!$storedRefreshToken->isBoundTo($refreshedIdentityToken)) {
-                    $this->storeRefreshToken($storedRefreshToken->withRefreshedIdentityToken($refreshedIdentityToken, $refreshedTokenSet->refreshToken, $now->getTimestamp()));
+                if ($this->storeRefreshedIdentityToken($identityToken, $refreshedTokenSet, $now->getTimestamp())) {
+                    $identityToken = $refreshedIdentityToken;
                 }
-                $identityToken = $refreshedIdentityToken;
             }
         }
 
@@ -246,7 +249,7 @@ final class OpenIdConnectProvider extends AbstractProvider
         if ($this->session->canBeResumed()) {
             $this->session->resume();
         }
-        $storedRefreshToken = $this->session->isStarted() ? StoredRefreshToken::fromSessionData($this->session->getData($this->getRefreshTokenSessionKey())) : null;
+        $storedRefreshToken = $this->readStoredRefreshToken();
         if ($storedRefreshToken === null) {
             $this->logger?->info(sprintf('OpenID Connect: The identity token %s is expired, no refresh token in session', self::describeValue($identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? null)), LogEnvironment::fromMethodName(__METHOD__));
         }
@@ -254,10 +257,20 @@ final class OpenIdConnectProvider extends AbstractProvider
     }
 
     /**
+     * Reads the refresh token from the session storage
+     *
+     * Flow reads session data from the storage on each call, so the result contains what parallel requests stored meanwhile.
+     */
+    private function readStoredRefreshToken(): ?StoredRefreshToken
+    {
+        return $this->session->isStarted() ? StoredRefreshToken::fromSessionData($this->session->getData($this->getRefreshTokenSessionKey())) : null;
+    }
+
+    /**
      * Returns a new identity token for the expired one, or null if it cannot be refreshed
      *
-     * Only the identity token which was issued last is refreshed at the identity provider. A request which still carries the identity
-     * token before it receives the refreshed identity token from the session, if the refresh happened a short while ago.
+     * Only identity tokens of the current generation are refreshed at the identity provider. A request which still carries an identity
+     * token of the previous generation receives the refreshed identity token from the session, if the refresh happened a short while ago.
      */
     private function refreshExpiredIdentityToken(IdentityToken $identityToken, StoredRefreshToken $storedRefreshToken, OpenIdConnectClient $client, DateTimeImmutable $now): ?TokenSet
     {
@@ -283,6 +296,40 @@ final class OpenIdConnectProvider extends AbstractProvider
             $this->logger?->info(sprintf('OpenID Connect: Could not refresh the identity token: %s', $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return null;
         }
+    }
+
+    /**
+     * Stores the refreshed identity token in the session, together with the identity tokens which parallel requests stored meanwhile
+     *
+     * The session data is read again right before each write, because parallel requests may have refreshed the same generation while
+     * this request waited for the identity provider. Session data is written without a lock, so each write is confirmed by reading it
+     * once more. An identity token which this request received from the session is already stored. Returns false if the session doesn't
+     * accept the expired identity token anymore, for example after a logout.
+     */
+    private function storeRefreshedIdentityToken(IdentityToken $expiredIdentityToken, TokenSet $refreshedTokenSet, int $now): bool
+    {
+        $accountIdentifier = self::describeValue($expiredIdentityToken->values[$this->options['accountIdentifierTokenValueName']] ?? null);
+        for ($attempt = 1; $attempt <= self::MAXIMUM_STORE_ATTEMPTS; $attempt++) {
+            $storedRefreshToken = $this->readStoredRefreshToken();
+            if ($storedRefreshToken?->isBoundTo($refreshedTokenSet->identityToken)) {
+                return true;
+            }
+
+            if ($storedRefreshToken?->isBoundTo($expiredIdentityToken)) {
+                $this->storeRefreshToken($storedRefreshToken->withRefreshedIdentityToken($refreshedTokenSet->identityToken, $refreshedTokenSet->refreshToken, $now));
+            } elseif ($storedRefreshToken?->hasRecentlyReplaced($expiredIdentityToken, $now)) {
+                $this->logger?->debug(sprintf('OpenID Connect: A parallel request refreshed the identity token %s as well, adding the refreshed identity token to the session', $accountIdentifier), LogEnvironment::fromMethodName(__METHOD__));
+                $this->storeRefreshToken($storedRefreshToken->withIdentityTokenOfParallelRefresh($refreshedTokenSet->identityToken, $refreshedTokenSet->refreshToken));
+            } else {
+                $this->logger?->notice(sprintf('OpenID Connect: Discarded the refreshed identity token %s, because the session no longer holds the refresh token of the expired identity token', $accountIdentifier), LogEnvironment::fromMethodName(__METHOD__));
+                return false;
+            }
+        }
+
+        if (!$this->readStoredRefreshToken()?->isBoundTo($refreshedTokenSet->identityToken)) {
+            $this->logger?->warning(sprintf('OpenID Connect: Could not store the refreshed identity token %s in the session, because parallel requests kept replacing it', $accountIdentifier), LogEnvironment::fromMethodName(__METHOD__));
+        }
+        return true;
     }
 
     /**
