@@ -109,8 +109,11 @@ provider. Change it with the "leeway" provider option.
 
 Signatures are verified with RSA keys and the algorithms RS256, RS384 and
 RS512. If a token names a key identifier ("kid"), only the key with this
-identifier is used. Keys whose "use", "key_ops" or "alg" don't allow
-verifying a signature with the algorithm of the token are ignored.
+identifier is used. If the cached key set doesn't contain this key, for
+example because the identity provider rotated its keys, the key set is
+loaded again, at most once per minute. Keys whose "use", "key_ops" or
+"alg" don't allow verifying a signature with the algorithm of the token
+are ignored.
 Tokens with critical header extensions ("crit") are rejected.
 
 ## Email as Account Identifier
