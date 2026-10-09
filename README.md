@@ -233,6 +233,41 @@ from a terminal:
 
 ```
 
+## Requests to the Identity Provider
+
+All requests of this package to the identity provider, for discovery,
+keys, codes and tokens, use an HTTP client with time limits, so that an
+identity provider which doesn't answer can't keep a request or a worker
+waiting. The defaults are 5 seconds for the connection and 10 seconds
+for the whole answer:
+
+```yaml
+Flownative:
+  OpenIdConnect:
+    Client:
+      httpClient:
+        connectTimeout: 5
+        timeout: 10
+```
+
+The client comes from `HttpClientFactoryInterface`. Replace its
+implementation in `Objects.yaml` to send the requests through a proxy,
+or in your tests, so that they never reach a real identity provider:
+
+```yaml
+# Configuration/Testing/Objects.yaml
+Flownative\OpenIdConnect\Client\HttpClientFactoryInterface:
+  className: Acme\App\Tests\Functional\FakeIdentityProviderHttpClientFactory
+```
+
+A factory for tests can return a Guzzle client with a `MockHandler`,
+or one whose handler answers like the identity provider of your tests.
+
+Outside of tests, a factory of your own must keep the verification of
+TLS certificates switched on. This client retrieves the discovery
+document and the keys which decide who can sign in, so whoever could
+answer in place of the identity provider could sign in as anybody.
+
 ## Authorization Code Grant
 
 The Authorization Code Grant is used for authenticating users using a

@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client;
 
 use Flownative\OAuth2\Client\OAuthClient as BaseOAuthClient;
+use GuzzleHttp\ClientInterface;
 use Neos\Flow\Annotations as Flow;
 
 /**
@@ -34,6 +35,9 @@ class OAuthClient extends BaseOAuthClient
     private array $options = [];
 
     private ?OpenIdConnectClient $openIdConnectClient = null;
+
+    #[Flow\Inject]
+    protected HttpClientFactoryInterface $httpClientFactory;
 
     public function setOpenIdConnectClient(OpenIdConnectClient $openIdConnectClient): void
     {
@@ -118,5 +122,13 @@ class OAuthClient extends BaseOAuthClient
             $this->openIdConnectClient = new OpenIdConnectClient($this->getServiceName());
         }
         $this->options = $this->openIdConnectClient->getOptions();
+    }
+
+    /**
+     * Exchanging codes and requesting tokens uses the same HTTP client, with the same time limits, as the OpenID Connect client
+     */
+    protected function createHttpClient(): ClientInterface
+    {
+        return $this->httpClientFactory->create();
     }
 }

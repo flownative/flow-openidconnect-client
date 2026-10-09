@@ -12,7 +12,7 @@ use Flownative\OAuth2\Client\UnknownAuthorizationHandleException;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
-use GuzzleHttp\Client as HttpClient;
+use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Psr7\Query;
 use GuzzleHttp\Psr7\Uri;
@@ -71,10 +71,10 @@ final class OpenIdConnectClient
     #[Flow\InjectConfiguration]
     protected array $settings;
 
+    protected ?ClientInterface $httpClient = null;
+
     #[Flow\InjectConfiguration(path: 'middleware')]
     protected array $middlewareSettings = [];
-
-    protected HttpClient $httpClient;
 
     /**
      * Not lazy, because a named injection would otherwise receive a dependency proxy which does not match the type.
@@ -84,6 +84,9 @@ final class OpenIdConnectClient
 
     #[Flow\Inject]
     protected HashService $hashService;
+
+    #[Flow\Inject]
+    protected HttpClientFactoryInterface $httpClientFactory;
 
     /**
      * Not typed, because Flow injects the caches configured in Objects.yaml lazily and the dependency proxy would not match the type.
@@ -100,7 +103,6 @@ final class OpenIdConnectClient
     public function __construct(string $serviceName)
     {
         $this->serviceName = $serviceName;
-        $this->httpClient = new HttpClient();
     }
 
     /**
@@ -354,7 +356,7 @@ final class OpenIdConnectClient
     {
         $tokenEndpoint = $this->options['tokenEndpoint'];
         try {
-            $response = $this->httpClient->request('POST', $tokenEndpoint, [
+            $response = $this->httpClient()->request('POST', $tokenEndpoint, [
                 'form_params' => [
                     'grant_type' => 'refresh_token',
                     'client_id' => $this->settings['services'][$this->serviceName]['options']['clientId'],
@@ -394,7 +396,7 @@ final class OpenIdConnectClient
     private function fetchJwks(): array
     {
         try {
-            $response = $this->httpClient->request('GET', $this->options['jwksUri']);
+            $response = $this->httpClient()->request('GET', $this->options['jwksUri']);
         } catch (GuzzleException $e) {
             throw new ConnectionException(sprintf('OpenID Connect Client: Failed retrieving JWKS from %s: %s', $this->options['jwksUri'], $e->getMessage()), 1559211266);
         }
@@ -427,7 +429,7 @@ final class OpenIdConnectClient
         $discoveredOptions = $this->discoveryCache->get($cacheIdentifier);
         if (empty($discoveredOptions)) {
             try {
-                $response = $this->httpClient->request('GET', $discoveryUri);
+                $response = $this->httpClient()->request('GET', $discoveryUri);
             } catch (GuzzleException $e) {
                 throw new ConnectionException(sprintf('OpenID Connect Client: Failed discovering options at %s: %s', $discoveryUri, $e->getMessage()), 1554902567);
             }
@@ -484,6 +486,14 @@ final class OpenIdConnectClient
     {
         $requiredScopeIdentifiers = $requestRefreshToken ? ['openid', 'offline_access'] : ['openid'];
         return trim(implode(' ', array_unique(array_merge(explode(' ', $scope), $requiredScopeIdentifiers))));
+    }
+
+    /**
+     * Created on first use, because the factory is injected only after the constructor
+     */
+    private function httpClient(): ClientInterface
+    {
+        return $this->httpClient ??= $this->httpClientFactory->create();
     }
 
     private static function isAbsoluteHttpUri(mixed $value): bool
