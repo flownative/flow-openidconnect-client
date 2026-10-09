@@ -646,14 +646,8 @@ class BillingService
     {
         $openIdConnectClient = new OpenIdConnectClient('test');
 
-        $accessToken = $openIdConnectClient->getAccessToken(
-            'test',
-            $this->clientId,
-            $this->clientSecret,
-            '',
-            Authorization::GRANT_CLIENT_CREDENTIALS,
-            $this->additionalParameters
-        );
+        // Client id, secret and the audience come from the configuration of the service
+        $accessToken = $openIdConnectClient->getClientCredentialsAccessToken();
 
         $httpClient = new Client(['allow_redirects' => false]);
         return $httpClient->request(

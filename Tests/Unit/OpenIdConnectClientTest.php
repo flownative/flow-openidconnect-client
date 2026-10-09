@@ -418,6 +418,50 @@ class OpenIdConnectClientTest extends TestCase
     }
 
     #[Test]
+    public function getClientCredentialsAccessTokenUsesTheCredentialsAndParametersOfTheService(): void
+    {
+        $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant(OpenIdConnectClientFixture::SERVICE_NAME, OpenIdConnectClientFixture::CLIENT_ID, 'read', ['audience' => 'https://api.example.com', 'resource' => 'given']);
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->method('getAuthorization')->willReturnOnConsecutiveCalls(null, self::createAuthorizationWithToken($authorizationId, time() + 3600));
+        $oAuthClient->expects($this->once())->method('requestAccessToken')->with(OpenIdConnectClientFixture::SERVICE_NAME, OpenIdConnectClientFixture::CLIENT_ID, OpenIdConnectClientFixture::CLIENT_SECRET, 'read', ['audience' => 'https://api.example.com', 'resource' => 'given']);
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class), serviceOptions: ['additionalParameters' => ['audience' => 'https://api.example.com', 'resource' => 'configured']]);
+
+        $client->getClientCredentialsAccessToken('read', ['resource' => 'given']);
+    }
+
+    public static function incompleteClientCredentials(): array
+    {
+        return [
+            'no client id' => [['clientId' => '']],
+            'no client secret' => [['clientSecret' => '']],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('incompleteClientCredentials')]
+    public function getClientCredentialsAccessTokenRequiresClientIdAndSecretOfTheService(array $serviceOptions): void
+    {
+        $client = OpenIdConnectClientFixture::createClient($this->createStub(OAuthClient::class), OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class), serviceOptions: $serviceOptions);
+
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionCode(1791540881);
+        $client->getClientCredentialsAccessToken();
+    }
+
+    #[Test]
+    public function refreshIdentityTokenUsesTheCredentialsOfTheClientOptions(): void
+    {
+        $httpClient = $this->createMock(HttpClient::class);
+        $httpClient->expects($this->once())->method('request')->with('POST', OpenIdConnectClientFixture::TOKEN_ENDPOINT, static::callback(static fn (array $options): bool => ($options['form_params']['client_id'] ?? null) === 'changed-client' && ($options['form_params']['client_secret'] ?? null) === 'changed-secret'))
+            ->willReturn(new Response(200, [], json_encode(['id_token' => JwtFixture::createSignedJwt(['sub' => 'alice'])], JSON_THROW_ON_ERROR)));
+        $client = OpenIdConnectClientFixture::createClient($this->createStub(OAuthClient::class), OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class), httpClient: $httpClient);
+        $options = $client->getOptions();
+        OpenIdConnectClientFixture::inject($client, 'options', array_merge($options, ['clientId' => 'changed-client', 'clientSecret' => 'changed-secret']));
+
+        $client->refreshIdentityToken('the-refresh-token');
+    }
+
+    #[Test]
     public function getAccessTokenRequestsTokenWithTheGivenScopeOnly(): void
     {
         $authorizationId = Authorization::generateAuthorizationIdForClientCredentialsGrant('test', 'the-client', 'read', ['audience' => 'https://api.example.com']);
