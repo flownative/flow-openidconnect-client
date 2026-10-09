@@ -64,7 +64,9 @@ final class IdentityTokenValidator
             throw new IdentityTokenRejectedException(sprintf('its audience %s contains none of %s', self::describeValue($identityToken->values['aud'] ?? null), self::describeValue($requirements->audiences)), 1791540863);
         }
 
-        if ($requirements->authorizedParty !== null) {
+        // Only a token addressed to this client can be an identity token issued to it. Access tokens for an API, which other clients
+        // obtained, name the calling client as authorized party.
+        if ($requirements->authorizedParty !== null && $identityToken->audienceContains($requirements->authorizedParty)) {
             self::checkAuthorizedParty($identityToken, $requirements->authorizedParty);
         }
 

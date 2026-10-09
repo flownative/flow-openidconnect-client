@@ -823,16 +823,22 @@ audience mapper.
 ### Authorized Party
 
 An identity token may name the client it was issued to in the "azp"
-claim. Without an "audience" option, the provider checks it as OpenID
-Connect asks for: if the token has several audiences, "azp" must be
-present, and if "azp" is present, it must be the client id of the
-service.
+claim. For every token whose "aud" claim contains the client id of the
+service, the provider checks it as OpenID Connect asks for: if the
+token has several audiences, "azp" must be present, and if "azp" is
+present, it must be the client id.
 
-With an "audience" option, the provider accepts access tokens for an
-API. Such tokens are usually obtained by other clients, and "azp" then
-names the client which called the API, so it is not checked. This is
-also the case if the "audience" option contains the client id, so don't
-set the option for an application which only accepts identity tokens.
+Access tokens for an API, accepted through the "audience" option, are
+usually obtained by other clients, and "azp" then names the client
+which called the API. As long as their audience doesn't contain the
+client id of the service, "azp" is not checked for them.
+
+Some identity providers put the client id itself into the audience of
+access tokens, for example Microsoft Entra ID if the API is the same
+app registration as the client and has no Application ID URI of its
+own. Access tokens which other clients obtained for such an API are
+then rejected. Give the API an identifier of its own, for example an
+Application ID URI like "api://…", and configure that as "audience".
 
 ### Clock Leeway
 

@@ -495,8 +495,8 @@ final class OpenIdConnectProvider extends AbstractProvider
     /**
      * The "issuer" and "audience" options of the provider take precedence over the issuer and the client id of the service
      *
-     * Only identity tokens issued to this client name it as authorized party ("azp"). With an "audience" option, the provider accepts
-     * access tokens for an API, which other clients obtained, so the authorized party is not checked then.
+     * The authorized party ("azp") is checked against the client id for every token addressed to this client, also with an "audience"
+     * option. Access tokens for an API, which other clients obtained, are left alone, because their audience doesn't contain it.
      */
     private function createIdentityTokenRequirements(array $clientOptions, int $leeway): IdentityTokenRequirements
     {
@@ -509,7 +509,7 @@ final class OpenIdConnectProvider extends AbstractProvider
             throw new RuntimeException(sprintf('OpenID Connect: No audience is configured for the authentication provider of service "%s". Configure the "audience" option or the "clientId" of the service', $this->options['serviceName']), 1789122176);
         }
         $clientId = $clientOptions['clientId'] ?? null;
-        $authorizedParty = !isset($this->options['audience']) && is_string($clientId) && $clientId !== '' ? $clientId : null;
+        $authorizedParty = is_string($clientId) && $clientId !== '' ? $clientId : null;
 
         return new IdentityTokenRequirements(
             issuers: $issuers,

@@ -424,12 +424,15 @@ class OpenIdConnectProviderTest extends TestCase
             'several audiences without azp' => [['aud' => [OpenIdConnectClientFixture::CLIENT_ID, 'https://other.example.com']], null, TokenInterface::WRONG_CREDENTIALS],
             'several audiences with azp naming the client' => [['aud' => [OpenIdConnectClientFixture::CLIENT_ID, 'https://other.example.com'], 'azp' => OpenIdConnectClientFixture::CLIENT_ID], null, TokenInterface::AUTHENTICATION_SUCCESSFUL],
             'access token of another client for a configured audience' => [['aud' => ['https://api.example.com', 'https://id.example.com/userinfo'], 'azp' => 'other-client'], 'https://api.example.com', TokenInterface::AUTHENTICATION_SUCCESSFUL],
+            'token for the client and a configured audience with azp of another client' => [['aud' => [OpenIdConnectClientFixture::CLIENT_ID, 'https://api.example.com'], 'azp' => 'other-client'], 'https://api.example.com', TokenInterface::WRONG_CREDENTIALS],
+            'token for the client and a configured audience without azp' => [['aud' => [OpenIdConnectClientFixture::CLIENT_ID, 'https://api.example.com']], 'https://api.example.com', TokenInterface::WRONG_CREDENTIALS],
+            'token for the client and a configured audience with azp naming the client' => [['aud' => [OpenIdConnectClientFixture::CLIENT_ID, 'https://api.example.com'], 'azp' => OpenIdConnectClientFixture::CLIENT_ID], 'https://api.example.com', TokenInterface::AUTHENTICATION_SUCCESSFUL],
         ];
     }
 
     #[Test]
     #[DataProvider('authorizedParties')]
-    public function authenticateChecksAuthorizedPartyOnlyWithoutConfiguredAudience(array $claims, ?string $audienceOption, int $expectedStatus): void
+    public function authenticateChecksAuthorizedPartyOfTokensForTheClient(array $claims, ?string $audienceOption, int $expectedStatus): void
     {
         $token = self::createTokenForBearerJwt(self::createJwt($claims));
         $options = ['roles' => ['Some.Package:User']];

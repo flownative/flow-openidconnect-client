@@ -8,8 +8,8 @@ use Neos\Flow\Annotations as Flow;
 /**
  * What an identity token must fulfil to be accepted by the IdentityTokenValidator
  *
- * The authorized party ("azp") is a required argument, so that every caller decides about it: the client id for identity tokens issued
- * to this client, or null for access tokens which other clients obtained for an API.
+ * The authorized party ("azp") is a required argument, so that every caller decides about it: usually the client id, which is then
+ * checked for every token addressed to this client, or null to not check it at all.
  *
  * @see https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation
  */
@@ -19,7 +19,7 @@ final readonly class IdentityTokenRequirements
     /**
      * @param string[] $issuers Of which one must have issued the token. The placeholder "{tenantid}" is replaced by the "tid" claim, as used by multi-tenant applications of Microsoft Entra ID
      * @param string[] $audiences Of which the "aud" claim must contain at least one
-     * @param string|null $authorizedParty The client id which "azp" must name if present, and which must be present if the token has several audiences. Null if "azp" is not checked
+     * @param string|null $authorizedParty The client id. For a token whose audience contains it, "azp" must name it if present, and must be present if the token has several audiences. Null if "azp" is not checked
      * @param string $accountIdentifierClaimName The claim which identifies the account. If it is "email", the address must be verified, unless $requireVerifiedEmail is false
      * @param int $leeway Seconds which compensate for clock differences between the identity provider and this application
      * @param string|null $nonce The nonce which the token must contain, or null if the caller checks it in another way
