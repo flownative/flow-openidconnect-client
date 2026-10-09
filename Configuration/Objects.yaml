@@ -1,3 +1,6 @@
+Flownative\OpenIdConnect\Client\HttpClientFactoryInterface:
+  className: Flownative\OpenIdConnect\Client\HttpClientFactory
+
 Flownative\OpenIdConnect\Client\OpenIdConnectClient:
   properties:
     discoveryCache:

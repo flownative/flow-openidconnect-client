@@ -5,6 +5,10 @@ Flownative:
         cookie:
           secure: true
           httpOnly: true
+      # Seconds to wait for a connection to the identity provider, and for its whole answer
+      httpClient:
+        connectTimeout: 5
+        timeout: 10
       services: []
 #        exampleService:
 #          options:
