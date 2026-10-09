@@ -336,6 +336,46 @@ Without further programming you need to manually create a Neos user
 which has the same username as the one provided in the "sub" claim by
 the OIDC identity provider.
 
+### Additional Authorization Parameters
+
+The entry point can send further parameters with the authorization
+request, for example "prompt", "login_hint" or "ui_locales" of
+[OpenID Connect Core 1.0, section 3.1.2.1](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest),
+or parameters of a specific identity provider, like "screen_hint" of
+Auth0, which opens the registration form instead of the login form:
+
+```yaml
+            entryPointOptions:
+              serviceName: 'acme'
+              authorizationParameters:
+                screen_hint: 'signup'
+```
+
+A controller which starts the authorization itself passes them to
+`OpenIdConnectClient::startAuthorization()`. Parameters which the
+client sets itself, like "state", "nonce" or "redirect_uri", are
+rejected.
+
+### Failed Logins
+
+If the login fails when the browser returns from the identity
+provider, the entry point shows a short page with a link to try again,
+instead of starting another login, which the identity provider would
+probably reject again. To show the failure in the layout and language
+of your application, let the entry point redirect to a page of it:
+
+```yaml
+            entryPointOptions:
+              serviceName: 'acme'
+              loginFailedRedirectUri: '/login?failed=1'
+```
+
+The option takes a path of the site or an absolute http(s) address.
+The page must be reachable without a login: if it is protected by this
+entry point, the login starts again, the identity provider sends the
+browser straight back, and the login goes round in circles. Why the
+login failed is written to the security log.
+
 ### Binding the Login to the Browser
 
 Before the entry point redirects the browser to the identity provider,
