@@ -79,6 +79,7 @@ class IdentityTokenValidatorTest extends TestCase
             'azp naming the client' => [['azp' => self::CLIENT_ID], []],
             'several audiences with azp naming the client' => [['aud' => [self::CLIENT_ID, 'https://api.example.com'], 'azp' => self::CLIENT_ID], []],
             'several audiences without azp if azp is not checked' => [['aud' => ['https://api.example.com', 'https://id.example.com/userinfo']], ['audiences' => ['https://api.example.com'], 'authorizedParty' => null]],
+            'azp of another client for a token not addressed to the client' => [['aud' => ['https://api.example.com', 'https://id.example.com/userinfo'], 'azp' => 'other-client'], ['audiences' => ['https://api.example.com']]],
             'azp of another client if azp is not checked' => [['aud' => ['https://api.example.com', 'https://id.example.com/userinfo'], 'azp' => 'other-client'], ['audiences' => ['https://api.example.com'], 'authorizedParty' => null]],
             'one of several issuers' => [['iss' => 'https://other.example.com/'], ['issuers' => [self::ISSUER, 'https://other.example.com/']]],
             'issuer with tenant placeholder' => [['iss' => 'https://login.example.com/tenant-1/v2.0', 'tid' => 'tenant-1'], ['issuers' => ['https://login.example.com/{tenantid}/v2.0']]],
