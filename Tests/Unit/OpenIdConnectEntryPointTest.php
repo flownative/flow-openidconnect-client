@@ -40,6 +40,16 @@ class OpenIdConnectEntryPointTest extends TestCase
             'missing service name' => [[], 1559898606],
             'scope is not a string' => [['serviceName' => 'test', 'scope' => ['profile']], 1560259102],
             'requestRefreshToken is not a boolean' => [['serviceName' => 'test', 'requestRefreshToken' => 'yes'], 1789108753],
+            'authorizationParameters is not an array' => [['serviceName' => 'test', 'authorizationParameters' => 'screen_hint=signup'], 1791540884],
+            'authorization parameter without a name' => [['serviceName' => 'test', 'authorizationParameters' => ['signup']], 1791540884],
+            'authorization parameter which is not a string' => [['serviceName' => 'test', 'authorizationParameters' => ['max_age' => 300]], 1791540884],
+            'loginFailedRedirectUri is not a string' => [['serviceName' => 'test', 'loginFailedRedirectUri' => ['/sign-in']], 1791540885],
+            'loginFailedRedirectUri is relative' => [['serviceName' => 'test', 'loginFailedRedirectUri' => 'sign-in'], 1791540885],
+            'loginFailedRedirectUri leads to another host without scheme' => [['serviceName' => 'test', 'loginFailedRedirectUri' => '//evil.example.com/'], 1791540885],
+            'loginFailedRedirectUri with a backslash after the slash' => [['serviceName' => 'test', 'loginFailedRedirectUri' => '/\\evil.example.com/'], 1791540885],
+            'loginFailedRedirectUri with another scheme' => [['serviceName' => 'test', 'loginFailedRedirectUri' => 'javascript:alert(1)'], 1791540885],
+            'loginFailedRedirectUri with a tab which browsers drop' => [['serviceName' => 'test', 'loginFailedRedirectUri' => "/\t/evil.example.com/"], 1791540885],
+            'loginFailedRedirectUri with a space' => [['serviceName' => 'test', 'loginFailedRedirectUri' => '/sign in'], 1791540885],
         ];
     }
 
@@ -227,6 +237,50 @@ class OpenIdConnectEntryPointTest extends TestCase
         static::assertSame('no-store', $response->getHeaderLine('Cache-Control'));
         static::assertFalse($response->hasHeader('Set-Cookie'));
         static::assertStringContainsString('<a href="https://www.example.com/secure?page=2">Try again</a>', (string)$response->getBody());
+    }
+
+    public static function loginFailedRedirectUris(): array
+    {
+        return [
+            'path of this site' => ['/sign-in?message=failed'],
+            'absolute address' => ['https://www.example.com/sign-in'],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('loginFailedRedirectUris')]
+    public function startAuthenticationRedirectsRejectedReturnToConfiguredPage(string $loginFailedRedirectUri): void
+    {
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->expects($this->never())->method('startAuthorization');
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test', 'loginFailedRedirectUri' => $loginFailedRedirectUri]);
+
+        $response = $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure?' . OpenIdConnectToken::OIDC_PARAMETER_NAME . '=rejected'), new Response());
+
+        static::assertSame(303, $response->getStatusCode());
+        static::assertSame($loginFailedRedirectUri, $response->getHeaderLine('Location'));
+        static::assertSame('no-store', $response->getHeaderLine('Cache-Control'));
+        static::assertFalse($response->hasHeader('Set-Cookie'));
+    }
+
+    #[Test]
+    public function startAuthenticationPassesConfiguredAuthorizationParameters(): void
+    {
+        $authorizationParameters = null;
+        $oAuthClient = $this->createStub(OAuthClient::class);
+        $oAuthClient->method('startAuthorization')->willReturnCallback(
+            function (string $clientId, UriInterface $returnToUri, string $scope, BrowserBinding $browserBinding, array $givenAuthorizationParameters) use (&$authorizationParameters): UriInterface {
+                $authorizationParameters = $givenAuthorizationParameters;
+                return new Uri(self::AUTHORIZATION_URI);
+            }
+        );
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test', 'authorizationParameters' => ['screen_hint' => 'signup', 'prompt' => 'login']]);
+
+        $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/sign-up'), new Response());
+
+        static::assertSame('signup', $authorizationParameters['screen_hint'] ?? null);
+        static::assertSame('login', $authorizationParameters['prompt'] ?? null);
+        static::assertIsString($authorizationParameters['nonce'] ?? null);
     }
 
     #[Test]

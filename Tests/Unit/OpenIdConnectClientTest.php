@@ -22,6 +22,7 @@ use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\JwtFixture;
 use RuntimeException;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\OpenIdConnectClientFixture;
 use GuzzleHttp\Client as HttpClient;
+use InvalidArgumentException;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
@@ -99,6 +100,41 @@ class OpenIdConnectClientTest extends TestCase
         $this->inject($this->oidcClient, 'jwksCache', $this->jwksCache);
         $this->inject($this->oidcClient, 'oAuthClient', $this->oAuthClient);
         $this->inject($this->oidcClient, 'logger', $logger);
+    }
+
+    #[Test]
+    public function startAuthorizationPassesAuthorizationParametersWithTheNonceOfTheLogin(): void
+    {
+        $nonce = Nonce::generate();
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->expects($this->once())->method('startAuthorization')
+            ->with(OpenIdConnectClientFixture::CLIENT_ID, static::anything(), static::anything(), static::anything(), ['prompt' => 'login', 'login_hint' => 'alice@example.com', 'nonce' => $nonce->value])
+            ->willReturn(new Uri('https://id.example.com/authorize'));
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class));
+
+        $client->startAuthorization(new Uri('https://www.example.com/secure'), 'profile', $nonce, true, ['prompt' => 'login', 'login_hint' => 'alice@example.com']);
+    }
+
+    public static function invalidAuthorizationParameters(): array
+    {
+        return [
+            'nonce, which belongs to the login' => [['nonce' => 'chosen-by-the-caller'], 1791540882],
+            'parameter without a name' => [['login'], 1791540883],
+            'parameter which is not a string' => [['max_age' => 300], 1791540883],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('invalidAuthorizationParameters')]
+    public function startAuthorizationRejectsInvalidAuthorizationParameters(array $authorizationParameters, int $expectedExceptionCode): void
+    {
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->expects($this->never())->method('startAuthorization');
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, OpenIdConnectClientFixture::createHashService(), $this->createStub(LoggerInterface::class));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionCode($expectedExceptionCode);
+        $client->startAuthorization(new Uri('https://www.example.com/secure'), 'profile', Nonce::generate(), true, $authorizationParameters);
     }
 
     #[Test]

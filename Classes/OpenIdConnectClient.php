@@ -234,10 +234,13 @@ final class OpenIdConnectClient
      *
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
      * @param bool $requestRefreshToken If "offline_access" should be requested, so that an expired identity token can be refreshed
+     * @param array<string, string> $authorizationParameters Further parameters of the authorization request, like "prompt", "login_hint" or "ui_locales" (OpenID Connect Core 1.0, section 3.1.2.1), or ones of the identity provider like "screen_hint". Those which the client sets itself are rejected
      * @throws OAuthClientException
      */
-    public function startAuthorization(UriInterface $returnToUri, string $scope, Nonce $nonce, bool $requestRefreshToken = true): UriInterface
+    public function startAuthorization(UriInterface $returnToUri, string $scope, Nonce $nonce, bool $requestRefreshToken = true, array $authorizationParameters = []): UriInterface
     {
+        self::validateAuthorizationParameters($authorizationParameters);
+
         $returnArguments = (string)TokenArguments::fromArray([TokenArguments::SERVICE_NAME => $this->serviceName, TokenArguments::NONCE => $nonce->value], $this->hashService);
         if (str_starts_with($returnArguments, 'ERROR')) {
             throw new RuntimeException(substr($returnArguments, 6));
@@ -258,7 +261,7 @@ final class OpenIdConnectClient
         }
         // The cookie of the nonce also binds the authorization to the browser, so that the code is only redeemed for the browser which started the login
         $browserBinding = $nonce->createBrowserBinding($cookieSettings);
-        return $this->oAuthClient->startAuthorization($this->options['clientId'], $returnToUri, $this->buildAuthorizationScope($scope, $requestRefreshToken), $browserBinding, ['nonce' => $nonce->value]);
+        return $this->oAuthClient->startAuthorization($this->options['clientId'], $returnToUri, $this->buildAuthorizationScope($scope, $requestRefreshToken), $browserBinding, array_merge($authorizationParameters, ['nonce' => $nonce->value]));
     }
 
     /**
@@ -494,6 +497,21 @@ final class OpenIdConnectClient
     private function httpClient(): ClientInterface
     {
         return $this->httpClient ??= $this->httpClientFactory->create();
+    }
+
+    /**
+     * The nonce belongs to the login and is set here; the OAuth client rejects the other parameters it sets itself, like the state
+     */
+    private static function validateAuthorizationParameters(array $authorizationParameters): void
+    {
+        if (array_key_exists('nonce', $authorizationParameters)) {
+            throw new InvalidArgumentException('OpenID Connect Client: The authorization parameters must not contain "nonce", because the client sets it itself.', 1791540882);
+        }
+        foreach ($authorizationParameters as $name => $value) {
+            if (!is_string($name) || $name === '' || !is_string($value)) {
+                throw new InvalidArgumentException('OpenID Connect Client: The authorization parameters must be strings with names.', 1791540883);
+            }
+        }
     }
 
     private static function isAbsoluteHttpUri(mixed $value): bool
