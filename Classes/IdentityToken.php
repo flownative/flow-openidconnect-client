@@ -11,7 +11,6 @@ use Lcobucci\JWT\Exception as JwtException;
 use Lcobucci\JWT\Token\Parser;
 use Lcobucci\JWT\Token\RegisteredClaims;
 use Lcobucci\JWT\UnencryptedToken;
-use Neos\Utility\Arrays;
 use phpseclib3\Crypt\PublicKeyLoader;
 use phpseclib3\Crypt\RSA;
 use phpseclib3\Exception\NoKeyLoadedException;
@@ -197,12 +196,22 @@ class IdentityToken
     }
 
     /**
-     * Checks if the identity token's "scope" value contains the given identifier
+     * Checks if the scope of the token contains the given identifier
+     *
+     * The "scope" claim separates identifiers by spaces (RFC 6749, section 3.3, and RFC 9068, section 2.2.3). Some identity providers name
+     * the claim "scp" instead, as a string like Microsoft Entra ID or as a list like Okta; both are accepted as well.
      */
     public function scopeContains(string $scopeIdentifier): bool
     {
-        $scopeIdentifiers = Arrays::trimExplode(',', $this->values['scope'] ?? '');
-        return in_array($scopeIdentifier, $scopeIdentifiers, true);
+        if ($scopeIdentifier === '') {
+            return false;
+        }
+        foreach (['scope', 'scp'] as $claimName) {
+            if (in_array($scopeIdentifier, self::scopeIdentifiersOf($this->values[$claimName] ?? null), true)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -294,5 +303,19 @@ class IdentityToken
     public function __toString(): string
     {
         return $this->asJwt();
+    }
+
+    /**
+     * @return string[]
+     */
+    private static function scopeIdentifiersOf(mixed $claim): array
+    {
+        if (is_string($claim)) {
+            return preg_split('/\s+/', $claim, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        }
+        if (is_array($claim) && array_is_list($claim)) {
+            return array_values(array_filter($claim, static fn (mixed $identifier): bool => is_string($identifier)));
+        }
+        return [];
     }
 }

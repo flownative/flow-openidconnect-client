@@ -188,6 +188,33 @@ class IdentityTokenTest extends TestCase
         static::assertSame($expectedResult, $identityToken->audienceContains($audience));
     }
 
+    public static function scopes(): array
+    {
+        return [
+            'one of several scopes separated by spaces' => [['scope' => 'openid email profile'], 'email', true],
+            'scopes separated by several kinds of whitespace' => [['scope' => "openid \temail\nprofile"], 'profile', true],
+            'only scope' => [['scope' => 'openid'], 'openid', true],
+            'scope not contained' => [['scope' => 'openid email'], 'profile', false],
+            'part of a scope' => [['scope' => 'openid email'], 'mail', false],
+            'scopes separated by commas are one scope' => [['scope' => 'openid,email'], 'email', false],
+            'scp claim as string' => [['scp' => 'User.Read Mail.Send'], 'Mail.Send', true],
+            'scp claim as list' => [['scp' => ['openid', 'email']], 'email', true],
+            'list with values which are no strings' => [['scp' => [42, 'email']], '42', false],
+            'object instead of list' => [['scp' => ['x' => 'email']], 'email', false],
+            'empty identifier' => [['scope' => 'openid  email'], '', false],
+            'no scope' => [[], 'openid', false],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('scopes')]
+    public function scopeContainsReadsScopesSeparatedBySpacesOrListed(array $claims, string $scopeIdentifier, bool $expectedResult): void
+    {
+        $identityToken = IdentityToken::fromJwt(self::createUnsignedJwt(array_merge(['iss' => 'https://id.example.com', 'sub' => 'subject'], $claims)));
+
+        static::assertSame($expectedResult, $identityToken->scopeContains($scopeIdentifier));
+    }
+
     public static function keyIdentifiersAndKeySets(): array
     {
         return [
