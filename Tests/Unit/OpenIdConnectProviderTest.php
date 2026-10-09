@@ -298,7 +298,11 @@ class OpenIdConnectProviderTest extends TestCase
     #[DataProvider('acceptedAudiences')]
     public function authenticateAcceptsTokenIssuedForExpectedAudience(string|array $audienceClaim, string|array|null $audienceOption): void
     {
-        $token = self::createTokenForBearerJwt(self::createJwt(['aud' => $audienceClaim]));
+        $claims = ['aud' => $audienceClaim];
+        if ($audienceOption === null && is_array($audienceClaim)) {
+            $claims['azp'] = OpenIdConnectClientFixture::CLIENT_ID;
+        }
+        $token = self::createTokenForBearerJwt(self::createJwt($claims));
         $options = ['roles' => ['Some.Package:User']];
         if ($audienceOption !== null) {
             $options['audience'] = $audienceOption;
@@ -329,6 +333,47 @@ class OpenIdConnectProviderTest extends TestCase
         }
 
         $this->createProvider($options)->authenticate($token);
+
+        self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
+    }
+
+    public static function authorizedParties(): array
+    {
+        return [
+            'no azp for the client id alone' => [[], null, TokenInterface::AUTHENTICATION_SUCCESSFUL],
+            'azp naming the client' => [['azp' => OpenIdConnectClientFixture::CLIENT_ID], null, TokenInterface::AUTHENTICATION_SUCCESSFUL],
+            'azp naming another client' => [['azp' => 'other-client'], null, TokenInterface::WRONG_CREDENTIALS],
+            'azp which is not a string' => [['azp' => [OpenIdConnectClientFixture::CLIENT_ID]], null, TokenInterface::WRONG_CREDENTIALS],
+            'several audiences without azp' => [['aud' => [OpenIdConnectClientFixture::CLIENT_ID, 'https://other.example.com']], null, TokenInterface::WRONG_CREDENTIALS],
+            'several audiences with azp naming the client' => [['aud' => [OpenIdConnectClientFixture::CLIENT_ID, 'https://other.example.com'], 'azp' => OpenIdConnectClientFixture::CLIENT_ID], null, TokenInterface::AUTHENTICATION_SUCCESSFUL],
+            'access token of another client for a configured audience' => [['aud' => ['https://api.example.com', 'https://id.example.com/userinfo'], 'azp' => 'other-client'], 'https://api.example.com', TokenInterface::AUTHENTICATION_SUCCESSFUL],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('authorizedParties')]
+    public function authenticateChecksAuthorizedPartyOnlyWithoutConfiguredAudience(array $claims, ?string $audienceOption, int $expectedStatus): void
+    {
+        $token = self::createTokenForBearerJwt(self::createJwt($claims));
+        $options = ['roles' => ['Some.Package:User']];
+        if ($audienceOption !== null) {
+            $options['audience'] = $audienceOption;
+        }
+
+        $this->createProvider($options)->authenticate($token);
+
+        static::assertSame($expectedStatus, $token->getAuthenticationStatus());
+    }
+
+    #[Test]
+    public function authenticateRejectsRefreshedTokenForAnotherAuthorizedParty(): void
+    {
+        $expiredJwt = self::createJwt(['exp' => time() - 600]);
+        $httpClient = $this->createStub(HttpClient::class);
+        $httpClient->method('request')->willReturn(new Response(200, [], json_encode(['id_token' => self::createJwt(['azp' => 'other-client'])])));
+        $token = self::createTokenForCookieJwt($expiredJwt);
+
+        $this->createProvider(['roles' => ['Some.Package:User']], session: $this->createSession(self::createStoredRefreshToken('the-refresh-token', $expiredJwt)), httpClient: $httpClient)->authenticate($token);
 
         self::assertNotAuthenticated($token, TokenInterface::WRONG_CREDENTIALS);
     }
@@ -1018,6 +1063,7 @@ class OpenIdConnectProviderTest extends TestCase
         $provider = OpenIdConnectProvider::create('SomeProvider', array_merge(['serviceName' => OpenIdConnectClientFixture::SERVICE_NAME], $options));
         OpenIdConnectClientFixture::inject($provider, 'logger', $logger);
         OpenIdConnectClientFixture::inject($provider, 'openIdConnectClientFactory', $clientFactory);
+        OpenIdConnectClientFixture::inject($provider, 'identityTokenValidator', new IdentityTokenValidator());
         OpenIdConnectClientFixture::inject($provider, 'session', $session ?? $this->createSession(null));
         OpenIdConnectClientFixture::inject($provider, 'policyService', $policyService ?? $this->createPolicyService(['Some.Package:User']));
         OpenIdConnectClientFixture::inject($provider, 'accountRepository', $accountRepository ?? $this->createStub(AccountRepository::class));

@@ -3,11 +3,14 @@ declare(strict_types=1);
 
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
-use DateInterval;
 use DateTimeImmutable;
 use Flownative\OpenIdConnect\Client\ConnectionException;
 use Flownative\OpenIdConnect\Client\CookieSettings;
+use Flownative\OpenIdConnect\Client\ExpiredIdentityTokenException;
 use Flownative\OpenIdConnect\Client\IdentityToken;
+use Flownative\OpenIdConnect\Client\IdentityTokenRejectedException;
+use Flownative\OpenIdConnect\Client\IdentityTokenRequirements;
+use Flownative\OpenIdConnect\Client\IdentityTokenValidator;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
@@ -71,6 +74,9 @@ final class OpenIdConnectProvider extends AbstractProvider
     #[Flow\Inject]
     protected OpenIdConnectClientFactory $openIdConnectClientFactory;
 
+    #[Flow\Inject]
+    protected IdentityTokenValidator $identityTokenValidator;
+
     #[Flow\InjectConfiguration(path: 'middleware')]
     protected array $middlewareSettings = [];
 
@@ -104,7 +110,6 @@ final class OpenIdConnectProvider extends AbstractProvider
         if (!is_int($leeway) || $leeway < 0) {
             throw new RuntimeException('The "leeway" option in the configuration of OpenID Connect authentication provider must be zero or a positive number of seconds', 1789122177);
         }
-        $leewayInterval = new DateInterval('PT' . $leeway . 'S');
         $this->options['requireVerifiedEmail'] ??= true;
         if (!is_bool($this->options['requireVerifiedEmail'])) {
             throw new RuntimeException('The "requireVerifiedEmail" option in the configuration of OpenID Connect authentication provider must be a boolean', 1789126720);
@@ -129,9 +134,15 @@ final class OpenIdConnectProvider extends AbstractProvider
             return;
         }
 
+        $requirements = $this->createIdentityTokenRequirements($client->getOptions(), $leeway);
         $now = new DateTimeImmutable();
-        $validationTime = $now->add($leewayInterval);
-        if (!$this->verifySignature($identityToken, $jwks) || !$this->hasAcceptableClaims($identityToken, $client->getOptions(), $validationTime)) {
+        try {
+            $validatedIdentityToken = $this->identityTokenValidator->validate($identityToken, $jwks, $requirements, $now);
+        } catch (ExpiredIdentityTokenException) {
+            // All other checks passed, so the token may still be refreshed
+            $validatedIdentityToken = null;
+        } catch (IdentityTokenRejectedException $exception) {
+            $this->logRejectedIdentityToken($exception);
             $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
             return;
         }
@@ -141,30 +152,39 @@ final class OpenIdConnectProvider extends AbstractProvider
         }
 
         // Clients which send a bearer token must refresh it themselves, because they never receive a token refreshed here
-        if ($identityToken->isExpiredAt($now->sub($leewayInterval)) && !$authenticationToken->hasBearerAuthorizationHeader()) {
+        if ($validatedIdentityToken === null && !$authenticationToken->hasBearerAuthorizationHeader()) {
             $storedRefreshToken = $this->findStoredRefreshToken($identityToken);
             $refreshedTokenSet = $storedRefreshToken !== null ? $this->refreshExpiredIdentityToken($identityToken, $storedRefreshToken, $client, $now) : null;
-            if ($storedRefreshToken !== null && $refreshedTokenSet !== null) {
-                $refreshedIdentityToken = $refreshedTokenSet->identityToken;
-                if (!$this->verifySignature($refreshedIdentityToken, $jwks) || !$this->hasAcceptableClaims($refreshedIdentityToken, $client->getOptions(), $validationTime) || !$this->isRefreshOf($refreshedIdentityToken, $identityToken)) {
+            if ($refreshedTokenSet !== null) {
+                try {
+                    $validatedRefreshedIdentityToken = $this->identityTokenValidator->validate($refreshedTokenSet->identityToken, $jwks, $requirements, $now);
+                } catch (ExpiredIdentityTokenException) {
+                    $validatedRefreshedIdentityToken = null;
+                } catch (IdentityTokenRejectedException $exception) {
+                    $this->logRejectedIdentityToken($exception);
                     $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
                     return;
                 }
-                if ($this->storeRefreshedIdentityToken($identityToken, $refreshedTokenSet, $now->getTimestamp())) {
-                    $identityToken = $refreshedIdentityToken;
+                if (!$this->isRefreshOf($refreshedTokenSet->identityToken, $identityToken)) {
+                    $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
+                    return;
+                }
+                if ($validatedRefreshedIdentityToken !== null && $this->storeRefreshedIdentityToken($identityToken, $refreshedTokenSet, $now->getTimestamp())) {
+                    $validatedIdentityToken = $validatedRefreshedIdentityToken;
                 }
             }
         }
 
-        if ($identityToken->isExpiredAt($now->sub($leewayInterval))) {
+        if ($validatedIdentityToken === null) {
             $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_NEEDED);
             $this->logger?->info(sprintf('OpenID Connect: The identity token %s is expired, need to re-authenticate', self::describeValue($identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? null)), LogEnvironment::fromMethodName(__METHOD__));
             return;
         }
+        $identityToken = $validatedIdentityToken->identityToken;
 
         $roleIdentifiers = $this->getConfiguredRoles($identityToken);
 
-        $account = $this->createTransientAccount($identityToken->values[$this->options['accountIdentifierTokenValueName']], $roleIdentifiers, $identityToken->asJwt());
+        $account = $this->createTransientAccount($validatedIdentityToken->accountIdentifier, $roleIdentifiers, $identityToken->asJwt());
         $account->authenticationAttempted(TokenInterface::AUTHENTICATION_SUCCESSFUL);
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
@@ -185,19 +205,6 @@ final class OpenIdConnectProvider extends AbstractProvider
     #[Flow\Signal]
     public function emitAuthenticated(TokenInterface $authenticationToken, IdentityToken $identityToken, array $roles): void
     {
-    }
-
-    private function verifySignature(IdentityToken $identityToken, array $jwks): bool
-    {
-        try {
-            if ($identityToken->hasValidSignature($jwks)) {
-                return true;
-            }
-            $this->logger?->notice('OpenID Connect: The identity token has an invalid signature', LogEnvironment::fromMethodName(__METHOD__));
-        } catch (ServiceException $exception) {
-            $this->logger?->notice(sprintf('OpenID Connect: Could not verify the signature of the identity token: %s', $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
-        }
-        return false;
     }
 
     /**
@@ -352,126 +359,51 @@ final class OpenIdConnectProvider extends AbstractProvider
     }
 
     /**
-     * @param DateTimeImmutable $validationTime The current time plus the leeway for tokens issued by a clock which is ahead
+     * The "issuer" and "audience" options of the provider take precedence over the issuer and the client id of the service
+     *
+     * Only identity tokens issued to this client name it as authorized party ("azp"). With an "audience" option, the provider accepts
+     * access tokens for an API, which other clients obtained, so the authorized party is not checked then.
      */
-    private function hasAcceptableClaims(IdentityToken $identityToken, array $clientOptions, DateTimeImmutable $validationTime): bool
+    private function createIdentityTokenRequirements(array $clientOptions, int $leeway): IdentityTokenRequirements
     {
-        $rejectionReason = $this->getClaimsRejectionReason($identityToken, $clientOptions, $validationTime);
-        if ($rejectionReason === null) {
-            return true;
-        }
-        $this->logger?->notice(sprintf('OpenID Connect: Rejected the identity token for service "%s", because %s', $this->options['serviceName'], $rejectionReason), LogEnvironment::fromMethodName(__METHOD__));
-        return false;
-    }
-
-    /**
-     * Returns why the claims of the given token are not acceptable, or null if they are
-     *
-     * The expiration time is checked separately, because an expired token may still be refreshed.
-     *
-     * @see https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation
-     */
-    private function getClaimsRejectionReason(IdentityToken $identityToken, array $clientOptions, DateTimeImmutable $validationTime): ?string
-    {
-        $issuerMatches = false;
-        foreach ($this->getExpectedIssuers($clientOptions, $identityToken) as $expectedIssuer) {
-            if ($identityToken->isIssuedBy($expectedIssuer)) {
-                $issuerMatches = true;
-                break;
-            }
-        }
-        if (!$issuerMatches) {
-            return sprintf('its issuer %s does not match the expected issuer', self::describeValue($identityToken->values['iss'] ?? null));
-        }
-
-        $expectedAudiences = $this->getExpectedAudiences($clientOptions);
-        if (!$this->audienceMatches($expectedAudiences, $identityToken)) {
-            return sprintf('its audience %s contains none of %s', self::describeValue($identityToken->values['aud'] ?? null), self::describeValue($expectedAudiences));
-        }
-
-        if ($identityToken->isNotYetValidAt($validationTime)) {
-            return 'it is not valid yet';
-        }
-
-        $accountIdentifier = $identityToken->values[$this->options['accountIdentifierTokenValueName']] ?? null;
-        if (!is_string($accountIdentifier) || $accountIdentifier === '') {
-            return sprintf('its claim "%s", which is used as account identifier, is missing or not a string', $this->options['accountIdentifierTokenValueName']);
-        }
-
-        // Identity providers may let users choose an email address without verifying it, so it only identifies an account once it is verified.
-        if ($this->options['accountIdentifierTokenValueName'] === 'email' && $this->options['requireVerifiedEmail'] && !in_array($identityToken->values['email_verified'] ?? null, [true, 'true'], true)) {
-            return 'its email address, which is used as account identifier, is not verified';
-        }
-        return null;
-    }
-
-    /**
-     * Returns the issuers of which one must have issued the token
-     *
-     * The "issuer" option of the provider takes precedence over the issuer of the service. Issuers
-     * containing the placeholder "{tenantid}", used for multi-tenant applications of Microsoft Entra
-     * ID, are resolved with the "tid" claim of the token and left out if the token has no valid "tid".
-     *
-     * @return string[]
-     */
-    private function getExpectedIssuers(array $clientOptions, IdentityToken $identityToken): array
-    {
-        $issuers = $this->options['issuer'] ?? $clientOptions['issuer'] ?? [];
-        if (is_string($issuers)) {
-            $issuers = [$issuers];
-        }
-        if (is_array($issuers)) {
-            $issuers = array_values(array_filter($issuers, static fn (mixed $issuer): bool => is_string($issuer) && $issuer !== ''));
-        }
-        if (!is_array($issuers) || $issuers === []) {
+        $issuers = self::toListOfNonEmptyStrings($this->options['issuer'] ?? $clientOptions['issuer'] ?? []);
+        if ($issuers === []) {
             throw new RuntimeException(sprintf('OpenID Connect: The issuer of service "%s" is unknown. Configure the "issuer" option of the authentication provider or the service, or a "discoveryUri" for the service', $this->options['serviceName']), 1789122175);
         }
-
-        $tenantIdentifier = $identityToken->values['tid'] ?? null;
-        $hasValidTenantIdentifier = is_string($tenantIdentifier) && preg_match('/^[a-zA-Z0-9-]+\z/', $tenantIdentifier) === 1;
-
-        $resolvedIssuers = [];
-        foreach ($issuers as $issuer) {
-            if (!str_contains($issuer, '{tenantid}')) {
-                $resolvedIssuers[] = $issuer;
-            } elseif ($hasValidTenantIdentifier) {
-                $resolvedIssuers[] = str_replace('{tenantid}', $tenantIdentifier, $issuer);
-            }
-        }
-        return $resolvedIssuers;
-    }
-
-    /**
-     * Returns the audiences of which a token must contain at least one: the "audience" option or the client id of the service
-     *
-     * @return string[]
-     */
-    private function getExpectedAudiences(array $clientOptions): array
-    {
-        $audiences = $this->options['audience'] ?? $clientOptions['clientId'] ?? [];
-        if (is_string($audiences)) {
-            $audiences = [$audiences];
-        }
-        if (is_array($audiences)) {
-            $audiences = array_values(array_filter($audiences, static fn (mixed $audience): bool => is_string($audience) && $audience !== ''));
-        }
-        if (!is_array($audiences) || $audiences === []) {
+        $audiences = self::toListOfNonEmptyStrings($this->options['audience'] ?? $clientOptions['clientId'] ?? []);
+        if ($audiences === []) {
             throw new RuntimeException(sprintf('OpenID Connect: No audience is configured for the authentication provider of service "%s". Configure the "audience" option or the "clientId" of the service', $this->options['serviceName']), 1789122176);
         }
-        return $audiences;
+        $clientId = $clientOptions['clientId'] ?? null;
+        $authorizedParty = !isset($this->options['audience']) && is_string($clientId) && $clientId !== '' ? $clientId : null;
+
+        return new IdentityTokenRequirements(
+            issuers: $issuers,
+            audiences: $audiences,
+            authorizedParty: $authorizedParty,
+            accountIdentifierClaimName: $this->options['accountIdentifierTokenValueName'],
+            requireVerifiedEmail: $this->options['requireVerifiedEmail'],
+            leeway: $leeway,
+        );
     }
 
     /**
-     * @param string[] $expectedAudiences
+     * @return string[]
      */
-    private function audienceMatches(array $expectedAudiences, IdentityToken $identityToken): bool
+    private static function toListOfNonEmptyStrings(mixed $value): array
     {
-        foreach ($expectedAudiences as $expectedAudience) {
-            if ($identityToken->audienceContains($expectedAudience)) {
-                return true;
-            }
+        if (is_string($value)) {
+            $value = [$value];
         }
-        return false;
+        if (!is_array($value)) {
+            return [];
+        }
+        return array_values(array_filter($value, static fn (mixed $item): bool => is_string($item) && $item !== ''));
+    }
+
+    private function logRejectedIdentityToken(IdentityTokenRejectedException $exception): void
+    {
+        $this->logger?->notice(sprintf('OpenID Connect: Rejected the identity token for service "%s", because %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
     }
 
     /**
