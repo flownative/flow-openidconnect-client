@@ -82,15 +82,8 @@ final class OidcCommandController extends CommandController
     {
         $openIdConnectClient = new OpenIdConnectClient($serviceName);
 
-        $additionalParameters = $this->settings['services'][$serviceName]['options']['additionalParameters'] ?? [];
         try {
-            $accessToken = $openIdConnectClient->getAccessToken(
-                $serviceName,
-                $this->settings['services'][$serviceName]['options']['clientId'],
-                $this->settings['services'][$serviceName]['options']['clientSecret'],
-                'profile name',
-                $additionalParameters
-            );
+            $accessToken = $openIdConnectClient->getClientCredentialsAccessToken('profile name');
         } catch (IdentityProviderException $e) {
             $this->outputLine('<error>%s: "%s"</error>', [$e->getMessage(), $e->getResponseBody()['error_description'] ?? '']);
             exit(1);
