@@ -188,6 +188,30 @@ class IdentityTokenTest extends TestCase
         static::assertSame($expectedResult, $identityToken->audienceContains($audience));
     }
 
+    public static function keyIdentifiersAndKeySets(): array
+    {
+        return [
+            'key identifier in key set' => ['key-1', [['kid' => 'key-2'], ['kid' => 'key-1']], false],
+            'key identifier not in key set' => ['key-3', [['kid' => 'key-1'], ['kid' => 'key-2']], true],
+            'key identifier and keys without identifier' => ['key-1', [['kty' => 'RSA'], 'not a key'], true],
+            'key identifier and empty key set' => ['key-1', [], true],
+            'no key identifier' => [null, [['kid' => 'key-1']], false],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('keyIdentifiersAndKeySets')]
+    public function hasUnknownKeyIdentifierLooksForTheKeyIdentifierOfTheTokenInTheKeySet(?string $keyIdentifier, array $jwks, bool $expectedResult): void
+    {
+        $header = ['typ' => 'JWT', 'alg' => 'RS256'];
+        if ($keyIdentifier !== null) {
+            $header['kid'] = $keyIdentifier;
+        }
+        $identityToken = IdentityToken::fromJwt(self::createUnsignedJwt(['iss' => 'https://id.example.com', 'sub' => 'subject'], $header));
+
+        static::assertSame($expectedResult, $identityToken->hasUnknownKeyIdentifier($jwks));
+    }
+
     private static function createUnsignedJwt(array $values, array $header = ['typ' => 'JWT', 'alg' => 'RS256']): string
     {
         $encode = static fn (string $data): string => rtrim(strtr(base64_encode($data), '+/', '-_'), '=');

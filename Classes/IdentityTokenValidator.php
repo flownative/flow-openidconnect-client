@@ -4,6 +4,7 @@ namespace Flownative\OpenIdConnect\Client;
 
 use DateInterval;
 use DateTimeImmutable;
+use Neos\Cache\Exception as CacheException;
 use Neos\Flow\Annotations as Flow;
 
 /**
@@ -19,14 +20,25 @@ final class IdentityTokenValidator
     /**
      * The expiration time is checked last, so that an ExpiredIdentityTokenException means that all other checks passed
      *
-     * @param array $jwks The JSON Web Key Set of the identity provider, see OpenIdConnectClient::getJwks()
+     * The keys come from the given client. If the token names a key which they don't contain, and claims to come from an expected
+     * issuer, the key set is reloaded, because the identity provider may have rotated its keys meanwhile.
+     *
      * @throws ExpiredIdentityTokenException
      * @throws IdentityTokenRejectedException
+     * @throws ConnectionException if the key set can't be retrieved
+     * @throws ServiceException if the identity provider sends an invalid key set
+     * @throws CacheException
      */
-    public function validate(IdentityToken $identityToken, array $jwks, IdentityTokenRequirements $requirements, ?DateTimeImmutable $now = null): ValidatedIdentityToken
+    public function validate(IdentityToken $identityToken, OpenIdConnectClient $client, IdentityTokenRequirements $requirements, ?DateTimeImmutable $now = null): ValidatedIdentityToken
     {
         $now ??= new DateTimeImmutable();
         $leewayInterval = new DateInterval('PT' . $requirements->leeway . 'S');
+
+        $jwks = $client->getJwks();
+        // A token which doesn't even claim to come from the identity provider can never be valid, so it must not trigger a reload
+        if ($identityToken->hasUnknownKeyIdentifier($jwks) && self::isIssuedByExpectedIssuer($identityToken, $requirements)) {
+            $jwks = $client->reloadJwks();
+        }
 
         try {
             $hasValidSignature = $identityToken->hasValidSignature($jwks);
@@ -37,14 +49,7 @@ final class IdentityTokenValidator
             throw new IdentityTokenRejectedException('its signature is invalid', 1791540861);
         }
 
-        $issuerMatches = false;
-        foreach (self::resolveIssuers($requirements->issuers, $identityToken) as $expectedIssuer) {
-            if ($identityToken->isIssuedBy($expectedIssuer)) {
-                $issuerMatches = true;
-                break;
-            }
-        }
-        if (!$issuerMatches) {
+        if (!self::isIssuedByExpectedIssuer($identityToken, $requirements)) {
             throw new IdentityTokenRejectedException(sprintf('its issuer %s does not match the expected issuer', self::describeValue($identityToken->values['iss'] ?? null)), 1791540862);
         }
 
@@ -88,6 +93,16 @@ final class IdentityTokenValidator
         }
 
         return new ValidatedIdentityToken($identityToken, $accountIdentifier);
+    }
+
+    private static function isIssuedByExpectedIssuer(IdentityToken $identityToken, IdentityTokenRequirements $requirements): bool
+    {
+        foreach (self::resolveIssuers($requirements->issuers, $identityToken) as $expectedIssuer) {
+            if ($identityToken->isIssuedBy($expectedIssuer)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

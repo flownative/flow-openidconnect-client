@@ -148,6 +148,27 @@ class IdentityToken
     }
 
     /**
+     * Tells if this token names a key identifier which no key of the given JSON Web Key Set has
+     *
+     * Identity providers rotate their signing keys, so such a token may be signed with a key which was published after the key set was
+     * loaded. Only the key identifier counts: if a key with this identifier exists but doesn't suit the algorithm of the token, a
+     * reloaded key set wouldn't help.
+     */
+    public function hasUnknownKeyIdentifier(array $jwks): bool
+    {
+        $keyIdentifier = $this->header['kid'] ?? null;
+        if ($keyIdentifier === null) {
+            return false;
+        }
+        foreach ($jwks as $key) {
+            if (is_array($key) && ($key['kid'] ?? null) === $keyIdentifier) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * A token without an expiration time counts as expired, because OpenID Connect requires the "exp" claim.
      */
     public function isExpiredAt(DateTimeInterface $now): bool
