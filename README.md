@@ -34,7 +34,9 @@ A few feature highlights of this package:
   applications or Neos websites
 - OIDC auto-discovery support for minimal configuration
 - support for multiple OIDC services (servers) within one application
-- integration into Flow's session management based on JWT cookies
+- integration into Flow's session management based on JWT cookies, or
+  sign-in to persisted accounts with an ordinary Flow session
+- signing out at the identity provider (RP-Initiated Logout)
 - mapping of Flow user roles from claims
 - automatic JWT signature verification
 - authentication via bearer access token
@@ -498,6 +500,73 @@ account, sign out first.
 
 When an application moves from the JWT cookie to the session mode,
 every user has to sign in once more.
+
+## Signing Out at the Identity Provider
+
+Ending the login in the application leaves the user signed in at the
+identity provider, so the next click on "Sign in" would sign them in
+again without asking. With RP-Initiated Logout, the application sends
+the browser to the identity provider after its own logout, and the
+identity provider ends its login as well and sends the browser back.
+
+`OpenIdConnectClient::buildEndSessionUri()` returns that address. It
+takes the "end_session_endpoint" from the discovery document. If the
+identity provider doesn't publish one, configure it for the service:
+
+```yaml
+Flownative:
+  OpenIdConnect:
+    Client:
+      services:
+        acme:
+          options:
+            endSessionEndpoint: 'https://id.example.com/oidc/logout'
+```
+
+Without either, the method returns null, and the application only ends
+its own login. Auth0, for example, only publishes the endpoint if the
+tenant setting "RP-Initiated Logout End Session Endpoint Discovery" is
+enabled.
+
+The identity provider expects the identity token of the login as a
+hint. `IdentityTokenOfLogin` finds it, in the JWT mode as well as in
+the session mode. Take it before the logout, because Flow destroys the
+session on logout:
+
+```php
+public function logoutAction(): void
+{
+    $client = $this->openIdConnectClientFactory->create('acme');
+    $endSessionUri = $client->buildEndSessionUri(
+        $this->identityTokenOfLogin->find('Acme.App:OpenIdConnect'),
+        new Uri($this->uriBuilder->setCreateAbsoluteUri(true)->uriFor('signedOut'))
+    );
+
+    $this->authenticationManager->logout();
+
+    if ($endSessionUri !== null) {
+        $this->redirectToUri($endSessionUri);
+    }
+    $this->redirect('signedOut');
+}
+```
+
+Call the logout action with a POST request from a form, so that Flow
+checks its CSRF token. Otherwise a link or an image on another site can
+sign the user out, and with RP-Initiated Logout also at the identity
+provider, which may end the login in all applications of the tenant.
+
+The post logout redirect URI must be registered for the client at the
+identity provider. The hint puts the identity token, with its claims
+like the email address, into the URL, and so into browser histories
+and logs. Leave it out if your identity provider doesn't need it.
+Microsoft Entra ID, for example, asks the user before it signs out
+without one.
+
+The method also accepts a "state", which the identity provider passes
+back with the redirect. If you use it to recognise the return, make it
+unguessable and verify it without the session, for example with a
+cookie, because the session ends with the logout.
 
 ## Client Credentials Grant
 

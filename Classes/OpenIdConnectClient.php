@@ -15,6 +15,7 @@ use Flownative\OpenIdConnect\Client\Authentication\TokenArguments;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Psr7\Query;
+use GuzzleHttp\Psr7\Uri;
 use InvalidArgumentException;
 use JsonException;
 use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
@@ -40,7 +41,8 @@ final class OpenIdConnectClient
         'tokenEndpoint' => '',
         'userInfoEndpoint' => '',
         'jwksUri' => '',
-        'scopesSupported' => ''
+        'scopesSupported' => '',
+        'endSessionEndpoint' => ''
     ];
 
     private const array DISCOVERY_OPTIONS_MAPPING = [
@@ -49,7 +51,8 @@ final class OpenIdConnectClient
         'token_endpoint' => 'tokenEndpoint',
         'userinfo_endpoint' => 'userInfoEndpoint',
         'jwks_uri' => 'jwksUri',
-        'scopes_supported' => 'scopesSupported'
+        'scopes_supported' => 'scopesSupported',
+        'end_session_endpoint' => 'endSessionEndpoint'
     ];
 
     private const int ACCESS_TOKEN_RENEWAL_MARGIN = 30; # seconds before expiration
@@ -125,6 +128,10 @@ final class OpenIdConnectClient
         if (empty($this->options['jwksUri'])) {
             throw new ConfigurationException(sprintf('OpenID Connect Client: Option "discoveryUri" or "jwksUri" has to be configured for service "%s".', $this->serviceName), 1554968498);
         }
+        $endSessionEndpoint = $this->options['endSessionEndpoint'];
+        if ($endSessionEndpoint !== '' && !self::isAbsoluteHttpUri($endSessionEndpoint)) {
+            throw new ConfigurationException(sprintf('OpenID Connect Client: The end session endpoint of service "%s" is not an absolute URI.', $this->serviceName), 1791540876);
+        }
 
         $this->oAuthClient = new OAuthClient($this->serviceName);
         $this->oAuthClient->setOpenIdConnectClient($this);
@@ -133,6 +140,36 @@ final class OpenIdConnectClient
     public function getOptions(): array
     {
         return $this->options;
+    }
+
+    /**
+     * Returns the address to send the browser to, so that the user signs out at the identity provider as well
+     *
+     * The endpoint comes from the discovery document, or from the option "endSessionEndpoint" if the identity provider doesn't publish
+     * one. Returns null if neither exists; the application then only ends its own login. The post logout redirect URI must be registered
+     * for the client at the identity provider.
+     *
+     * @see https://openid.net/specs/openid-connect-rpinitiated-1_0.html
+     */
+    public function buildEndSessionUri(?IdentityToken $identityTokenHint = null, ?UriInterface $postLogoutRedirectUri = null, ?string $state = null): ?UriInterface
+    {
+        $endSessionEndpoint = $this->options['endSessionEndpoint'];
+        if (!is_string($endSessionEndpoint) || $endSessionEndpoint === '') {
+            return null;
+        }
+        $endSessionUri = new Uri($endSessionEndpoint);
+        $queryParameters = Query::parse($endSessionUri->getQuery());
+        $queryParameters['client_id'] = $this->options['clientId'];
+        if ($identityTokenHint !== null) {
+            $queryParameters['id_token_hint'] = $identityTokenHint->asJwt();
+        }
+        if ($postLogoutRedirectUri !== null) {
+            $queryParameters['post_logout_redirect_uri'] = (string)$postLogoutRedirectUri;
+        }
+        if ($state !== null) {
+            $queryParameters['state'] = $state;
+        }
+        return $endSessionUri->withQuery(Query::build($queryParameters));
     }
 
     /**
@@ -407,6 +444,11 @@ final class OpenIdConnectClient
         }
 
         foreach ($discoveredOptions as $optionName => $optionValue) {
+            // Signing out at the identity provider is optional, so an end session endpoint which is empty or not an absolute URI counts as
+            // not published, and the configured one stays as the fallback, instead of making the client unusable
+            if ($optionName === 'end_session_endpoint' && !self::isAbsoluteHttpUri($optionValue)) {
+                continue;
+            }
             if (isset(self::DISCOVERY_OPTIONS_MAPPING[$optionName])) {
                 $this->options[self::DISCOVERY_OPTIONS_MAPPING[$optionName]] = $optionValue;
             }
@@ -442,5 +484,10 @@ final class OpenIdConnectClient
     {
         $requiredScopeIdentifiers = $requestRefreshToken ? ['openid', 'offline_access'] : ['openid'];
         return trim(implode(' ', array_unique(array_merge(explode(' ', $scope), $requiredScopeIdentifiers))));
+    }
+
+    private static function isAbsoluteHttpUri(mixed $value): bool
+    {
+        return is_string($value) && in_array(parse_url($value, PHP_URL_SCHEME), ['https', 'http'], true) && is_string(parse_url($value, PHP_URL_HOST));
     }
 }
