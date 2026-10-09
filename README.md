@@ -657,6 +657,8 @@ checks pass:
   provider
 - the token was issued by the issuer of the configured service ("iss")
 - the token was issued for the audience of your application ("aud")
+- the token was issued to your client ("azp"), see "Authorized Party"
+  below
 - the token is not expired ("exp") and already valid ("nbf", "iat")
 - the claim used as account identifier is present, and confirmed by
   "email_verified" if it is the "email" claim
@@ -728,6 +730,20 @@ audience mapper.
                   …
 ```
 
+### Authorized Party
+
+An identity token may name the client it was issued to in the "azp"
+claim. Without an "audience" option, the provider checks it as OpenID
+Connect asks for: if the token has several audiences, "azp" must be
+present, and if "azp" is present, it must be the client id of the
+service.
+
+With an "audience" option, the provider accepts access tokens for an
+API. Such tokens are usually obtained by other clients, and "azp" then
+names the client which called the API, so it is not checked. This is
+also the case if the "audience" option contains the client id, so don't
+set the option for an application which only accepts identity tokens.
+
 ### Clock Leeway
 
 The clocks of your application and the identity provider may differ
@@ -759,6 +775,38 @@ key, you should flush the respective cache (or all caches):
 ```
    ./flow flow:cache:flushone Flownative_OpenIdConnect_Client_JWKs
 ``` 
+
+### Validating Tokens in Your Own Code
+
+If your application receives an identity token in another way, for
+example in a controller of its own, validate it with the same checks
+the provider uses:
+
+```php
+$client = $this->openIdConnectClientFactory->create('myService');
+$options = $client->getOptions();
+
+try {
+    $validatedIdentityToken = $this->identityTokenValidator->validate(
+        IdentityToken::fromJwt($jwt),
+        $client->getJwks(),
+        new IdentityTokenRequirements(
+            issuers: [$options['issuer']],
+            audiences: [$options['clientId']],
+            authorizedParty: $options['clientId'],
+            nonce: $expectedNonce,
+        )
+    );
+} catch (IdentityTokenRejectedException $exception) {
+    // The message says why, for example "its audience … contains none of …"
+}
+
+$accountIdentifier = $validatedIdentityToken->accountIdentifier;
+```
+
+The expiration time is checked last. An `ExpiredIdentityTokenException`,
+a subclass of `IdentityTokenRejectedException`, therefore means that
+the token passed all other checks.
 
 ## More about OpenID Connect
 
