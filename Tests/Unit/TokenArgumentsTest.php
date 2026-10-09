@@ -47,6 +47,14 @@ class TokenArgumentsTest extends TestCase
     }
 
     #[Test]
+    public function fromSignedStringRejectsStringTooShortToContainAnHmac(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionCode(1560165515);
+        TokenArguments::fromSignedString('arguments', OpenIdConnectClientFixture::createHashService());
+    }
+
+    #[Test]
     public function fromSignedStringRejectsPayloadWhichIsNotAnArray(): void
     {
         $hashService = OpenIdConnectClientFixture::createHashService();

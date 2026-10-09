@@ -2,51 +2,23 @@
 declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Authentication;
 
-use Flownative\OAuth2\Client\UnknownAuthorizationHandleException;
-use Flownative\OpenIdConnect\Client\ConnectionException;
-use Flownative\OpenIdConnect\Client\CookieSettings;
 use Flownative\OpenIdConnect\Client\IdentityToken;
-use Flownative\OpenIdConnect\Client\OAuthClient;
-use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
-use Flownative\OpenIdConnect\Client\ServiceException;
 use InvalidArgumentException;
-use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Mvc\ActionRequest;
-use Neos\Flow\Security\Authentication\Token\AbstractToken;
 use Neos\Flow\Security\Authentication\Token\SessionlessTokenInterface;
 use Neos\Flow\Security\Authentication\TokenInterface;
-use Neos\Flow\Security\Cryptography\HashService;
 use Neos\Flow\Security\Exception\AccessDeniedException;
 use Neos\Flow\Security\Exception\AuthenticationRequiredException;
 use Neos\Flow\Security\Exception\InvalidAuthenticationStatusException;
 
-final class OpenIdConnectToken extends AbstractToken implements SessionlessTokenInterface
+/**
+ * Carries the login in a JWT cookie or in a bearer token, and is checked again on every request
+ */
+final class OpenIdConnectToken extends AbstractOpenIdConnectToken implements SessionlessTokenInterface
 {
-    /**
-     * Name of the parameter used internally by this OpenID Connect client package in GET query parts
-     */
-    public const string OIDC_PARAMETER_NAME = 'flownative_oidc';
-
-    protected array $queryParameters = [];
-
-    protected array $cookies = [];
-
     protected string $authorizationHeader = '';
 
-    protected string $refreshToken = '';
-
     protected bool $bearerAuthorizationHeaderGiven = false;
-
-    protected string $nonceCookieName = '';
-
-    #[Flow\Inject]
-    protected OpenIdConnectClientFactory $openIdConnectClientFactory;
-
-    #[Flow\Inject]
-    protected HashService $hashService;
-
-    #[Flow\InjectConfiguration(path: 'middleware')]
-    protected array $middlewareSettings = [];
 
     /**
      * @throws InvalidAuthenticationStatusException
@@ -79,50 +51,8 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
     {
         if ($this->bearerAuthorizationHeaderGiven) {
             $identityToken = $this->extractIdentityTokenFromAuthorizationHeader($this->authorizationHeader);
-        } elseif (isset($this->queryParameters[self::OIDC_PARAMETER_NAME])) {
-            $authorizationIdQueryParameterName = OAuthClient::generateAuthorizationIdQueryParameterName(OAuthClient::SERVICE_TYPE);
-            if (!isset($this->queryParameters[$authorizationIdQueryParameterName])) {
-                throw new AccessDeniedException(sprintf('Missing authorization identifier "%s" from query parameters', $authorizationIdQueryParameterName), 1560350311);
-            }
-            $signedTokenArguments = $this->queryParameters[self::OIDC_PARAMETER_NAME];
-            $authorizationHandle = $this->queryParameters[$authorizationIdQueryParameterName];
-            if (!is_string($signedTokenArguments) || !is_string($authorizationHandle)) {
-                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
-                throw new AccessDeniedException('The OpenID Connect query parameters are not strings', 1789122178);
-            }
-            try {
-                $tokenArguments = TokenArguments::fromSignedString($signedTokenArguments, $this->hashService);
-            } catch (InvalidArgumentException $exception) {
-                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
-                throw new AccessDeniedException('Could not extract token arguments from query parameters', 1560349658, $exception);
-            }
-
-            // Creating the client may already contact the identity provider for discovery
-            try {
-                $client = $this->openIdConnectClientFactory->create($tokenArguments[TokenArguments::SERVICE_NAME]);
-                $tokenSet = $client->getIdentityToken($authorizationHandle, $this->cookies);
-            } catch (UnknownAuthorizationHandleException $exception) {
-                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
-                throw new AccessDeniedException('The finished authorization is unknown, has expired or was not started in this browser', 1789395654, $exception);
-            } catch (ServiceException | ConnectionException $exception) {
-                throw new AccessDeniedException('Could not retrieve the identity token of the finished authorization', 1560350413, $exception);
-            }
-
-            $nonce = $tokenSet->identityToken->values['nonce'] ?? null;
-            if (!is_string($nonce)) {
-                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
-                throw new AccessDeniedException('The identity token of the finished authorization contains no nonce, although the authentication request sent one', 1789131857);
-            }
-            // The nonce must be the one of this authorization, and its secret must be in this browser
-            $expectedNonce = $tokenArguments[TokenArguments::NONCE];
-            $cookieSettings = CookieSettings::fromMiddlewareSettings($this->middlewareSettings);
-            if (!is_string($expectedNonce) || !hash_equals($expectedNonce, $nonce) || !Nonce::isBoundToCookies($nonce, $this->cookies, $cookieSettings)) {
-                $this->setAuthenticationStatus(self::WRONG_CREDENTIALS);
-                throw new AccessDeniedException('The finished authorization was not started in this browser', 1789131856);
-            }
-            $identityToken = $tokenSet->identityToken;
-            $this->refreshToken = $tokenSet->refreshToken;
-            $this->nonceCookieName = Nonce::getCookieNameForValue($nonce, $cookieSettings);
+        } elseif ($this->isReturnFromIdentityProvider()) {
+            $identityToken = $this->extractIdentityTokenFromFinishedAuthorization();
         } else {
             $identityToken = $this->extractIdentityTokenFromCookie($cookieName);
         }
@@ -131,33 +61,12 @@ final class OpenIdConnectToken extends AbstractToken implements SessionlessToken
         return $identityToken;
     }
 
-    public function getRefreshToken(): string
-    {
-        return $this->refreshToken;
-    }
-
     /**
      * Tells if the request carries a bearer token in the "Authorization" header. The identity token is then only read from this header, even if it is invalid.
      */
     public function hasBearerAuthorizationHeader(): bool
     {
         return $this->bearerAuthorizationHeaderGiven;
-    }
-
-    /**
-     * Returns the name of the nonce cookie which bound the finished authorization to this browser, or an empty string
-     */
-    public function getNonceCookieName(): string
-    {
-        return $this->nonceCookieName;
-    }
-
-    /**
-     * Tells if the identity token comes from an authorization which this browser has just finished at the identity provider
-     */
-    public function hasFinishedAuthorization(): bool
-    {
-        return $this->nonceCookieName !== '';
     }
 
     /**

@@ -409,6 +409,96 @@ it in the entry point options:
 
 Note: Check the [Flownative.OpenidConnect.Neos](https://github.com/flownative/openidconnect-neos) package for a working implementation.
 
+## Session Mode with Persisted Accounts
+
+By default, the provider keeps the login in a JWT cookie and
+authenticates a transient account on every request. Applications which
+keep their own accounts can use the session mode instead: the identity
+provider vouches for the user once, and from then on an ordinary Flow
+session holds the login of a persisted account.
+
+That has a few consequences which are often wanted:
+
+- the login can be ended on the server, for example for all sessions
+  of an account, because Flow tags each session with its account
+- roles belong to the account, not to the configuration or the claims
+- the session decides how long the login lasts, not the identity token,
+  so no refresh tokens are needed
+
+To use it, configure the `OpenIdConnectSessionToken` and an account
+resolver. The resolver decides which persisted account an identity
+signs in to. The `PersistedAccountResolver` of this package finds the
+active account whose identifier is the claim configured in
+`accountIdentifierTokenValueName` ("sub" by default). With
+`lookupProviderName`, it looks for accounts of another authentication
+provider, for example those which can also sign in with a password.
+
+```yaml
+Neos:
+  Flow:
+    security:
+      authentication:
+        providers:
+          'Acme.App:OpenIdConnect':
+            provider: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider'
+            providerOptions:
+              serviceName: 'acme'
+              accountResolver: 'Flownative\OpenIdConnect\Client\Authentication\PersistedAccountResolver'
+              lookupProviderName: 'Acme.App:Login'
+            token: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectSessionToken'
+            entryPoint: 'Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectEntryPoint'
+            entryPointOptions:
+              serviceName: 'acme'
+              scope: 'openid email profile'
+              requestRefreshToken: false
+```
+
+Set `requestRefreshToken` of the entry point to false. The session mode
+doesn't use refresh tokens and discards one if the identity provider
+issues it anyway, but the identity provider would still keep a
+long-lived credential for nothing. The provider logs a warning if it
+receives a refresh token in session mode.
+
+The options `roles`, `rolesFromClaims` and `addRolesFromExistingAccount`
+can't be used in session mode, because they would change the roles of
+the persisted account.
+
+The `PersistedAccountResolver` only looks at the account identifier, so
+it must be unique across all issuers the provider accepts. "sub" is only
+unique per issuer, and "email" not even that across tenants. If you
+accept several issuers or a multi-tenant issuer with "{tenantid}",
+write a resolver of your own which takes the "iss" claim into account.
+
+An application which admits identities in its own way implements
+`AccountResolverInterface`. It receives the identity token only after
+it passed all checks, and returns the account or null:
+
+```php
+final class AccountResolver implements AccountResolverInterface
+{
+    public function resolve(ValidatedIdentityToken $validatedIdentityToken, string $authenticationProviderName): ?Account
+    {
+        // For example: find the person linked to this identity, or link
+        // it on the first sign-in through a verified email address
+    }
+}
+```
+
+The browser returns from the identity provider with a GET request, and
+Flow only persists objects in such a request which were allowed
+explicitly. The provider does that for an existing account which the
+resolver returns. A resolver which creates an account, or changes
+other objects, must add them to their repository and call
+`allowObject()` of the persistence manager itself.
+
+While somebody is signed in, the session token ignores a return from
+the identity provider, so that a link with the return parameters of
+another authorization can't sign them out. To sign in with another
+account, sign out first.
+
+When an application moves from the JWT cookie to the session mode,
+every user has to sign in once more.
+
 ## Client Credentials Grant
 
 Client Credentials Grant is a bit simpler than Authorization Code Grant,

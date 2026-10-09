@@ -6,6 +6,7 @@ use ArrayAccess;
 use InvalidArgumentException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Security\Cryptography\HashService;
+use Neos\Flow\Security\Exception\InvalidArgumentForHashGenerationException;
 use Neos\Flow\Security\Exception\InvalidHashException;
 use Throwable;
 
@@ -34,7 +35,7 @@ final class TokenArguments implements ArrayAccess
         try {
             $payloadAsString = $hashService->validateAndStripHmac(base64_decode($encodedString));
             $payload = json_decode($payloadAsString, true);
-        } catch (InvalidHashException) {
+        } catch (InvalidHashException|InvalidArgumentForHashGenerationException) {
             throw new InvalidArgumentException('OpenID Connect: The token arguments were appended by an invalid HMAC', 1560165515);
         }
 

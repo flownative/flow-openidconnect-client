@@ -13,6 +13,7 @@ namespace Flownative\OpenIdConnect\Client;
  * source code.
  */
 
+use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectSessionToken;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Http\SetJwtCookieMiddleware;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\OpenIdConnectClientFixture;
@@ -318,6 +319,21 @@ class SetJwtCookieMiddlewareTest extends TestCase
         $response = $middleware->process($this->mockRequest, $this->mockNextRequestHandler);
 
         self::assertContains('flownative_oidc_nonce_0123456789abcdef=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax', $response->getHeader('Set-Cookie'));
+    }
+
+    #[Test]
+    public function processRemovesNonceCookieButSetsNoJwtCookieForSessionToken(): void
+    {
+        $middleware = $this->getMiddleware();
+        $this->givenAuthenticatedAccount();
+        $token = new OpenIdConnectSessionToken();
+        OpenIdConnectClientFixture::inject($token, 'nonceCookieName', 'flownative_oidc_nonce_0123456789abcdef');
+        $this->mockSecurityContext->method('getAuthenticationTokensOfType')->willReturn([$token]);
+
+        $this->mockNextRequestHandler->originalResponse = new Response();
+        $response = $middleware->process($this->mockRequest, $this->mockNextRequestHandler);
+
+        self::assertSame(['flownative_oidc_nonce_0123456789abcdef=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; Path=/; Secure; HttpOnly; SameSite=lax'], $response->getHeader('Set-Cookie'));
     }
 
     #[Test]

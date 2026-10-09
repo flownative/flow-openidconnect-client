@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client\Http;
 
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
+use Flownative\OpenIdConnect\Client\Authentication\AbstractOpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\CookieSettings;
 use Flownative\OpenIdConnect\Client\IdentityToken;
@@ -53,14 +54,18 @@ final class SetJwtCookieMiddleware implements MiddlewareInterface
 
         $cookieSettings = CookieSettings::fromMiddlewareSettings($this->options);
 
-        foreach ($this->securityContext->getAuthenticationTokensOfType(OpenIdConnectToken::class) as $token) {
+        foreach ($this->securityContext->getAuthenticationTokensOfType(AbstractOpenIdConnectToken::class) as $token) {
             // Requests with a bearer token don't touch the cookie. Setting it would make the browser send the token automatically, and
             // removing it would end a login based on the cookie because of a failed bearer token.
-            if ($token->hasBearerAuthorizationHeader()) {
+            if ($token instanceof OpenIdConnectToken && $token->hasBearerAuthorizationHeader()) {
                 continue;
             }
             if ($token->getNonceCookieName() !== '') {
                 $response = $response->withAddedHeader('Set-Cookie', (string)Nonce::createRemovalCookie($token->getNonceCookieName(), $cookieSettings));
+            }
+            // The session keeps the login of any other token, so it gets no JWT cookie
+            if (!$token instanceof OpenIdConnectToken) {
+                continue;
             }
             $providerName = $token->getAuthenticationProviderName();
             $providerOptions = $this->authenticationProviderConfiguration[$token->getAuthenticationProviderName()]['providerOptions'] ?? [];
