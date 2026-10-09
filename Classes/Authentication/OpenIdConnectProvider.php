@@ -94,6 +94,9 @@ final class OpenIdConnectProvider extends AbstractProvider
     #[Flow\Inject]
     protected SecurityContext $securityContext;
 
+    #[Flow\Inject]
+    protected IdentityTokenOfLogin $identityTokenOfLogin;
+
     #[Flow\InjectConfiguration(path: 'middleware')]
     protected array $middlewareSettings = [];
 
@@ -290,6 +293,8 @@ final class OpenIdConnectProvider extends AbstractProvider
         if ($this->session->isStarted()) {
             $this->session->putData($this->getRefreshTokenSessionKey(), null);
         }
+        // The identity provider expects the identity token as a hint when the user signs out
+        $this->identityTokenOfLogin->rememberInSession($this->name, $validatedIdentityToken->identityToken);
         $authenticationToken->setAccount($account);
         $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
 

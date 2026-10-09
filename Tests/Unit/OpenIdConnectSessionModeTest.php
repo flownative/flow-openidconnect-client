@@ -16,6 +16,7 @@ namespace Flownative\OpenIdConnect\Client;
 use Closure;
 use Flownative\OAuth2\Client\Authorization;
 use Flownative\OpenIdConnect\Client\Authentication\AccountResolverInterface;
+use Flownative\OpenIdConnect\Client\Authentication\IdentityTokenOfLogin;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectSessionToken;
@@ -233,6 +234,30 @@ class OpenIdConnectSessionModeTest extends TestCase
     }
 
     #[Test]
+    public function authenticateRemembersTheIdentityTokenForSigningOut(): void
+    {
+        $resolver = $this->createStub(AccountResolverInterface::class);
+        $resolver->method('resolve')->willReturn(self::createAccount('alice', 'SomeProvider'));
+        $session = $this->createMock(SessionInterface::class);
+        $session->expects($this->once())->method('putData')->with('flownative_oidc_identity_token:SomeProvider', static::callback(static fn (string $jwt): bool => (IdentityToken::fromJwt($jwt)->values['sub'] ?? null) === 'alice'));
+
+        [$provider, $token] = $this->createProviderAndTokenForReturn(resolver: $resolver, identityTokenOfLogin: $this->createIdentityTokenOfLogin($session));
+        $provider->authenticate($token);
+    }
+
+    #[Test]
+    public function authenticateDoesNotRememberIdentityTokenOfRejectedIdentity(): void
+    {
+        $resolver = $this->createStub(AccountResolverInterface::class);
+        $resolver->method('resolve')->willReturn(null);
+        $session = $this->createMock(SessionInterface::class);
+        $session->expects($this->never())->method('putData');
+
+        [$provider, $token] = $this->createProviderAndTokenForReturn(resolver: $resolver, identityTokenOfLogin: $this->createIdentityTokenOfLogin($session));
+        $provider->authenticate($token);
+    }
+
+    #[Test]
     public function authenticatePassesLookupProviderNameToTheResolver(): void
     {
         $resolver = $this->createMock(AccountResolverInterface::class);
@@ -388,6 +413,7 @@ class OpenIdConnectSessionModeTest extends TestCase
         ?AccountRepository $accountRepository = null,
         ?ObjectManagerInterface $objectManager = null,
         string $refreshToken = '',
+        ?IdentityTokenOfLogin $identityTokenOfLogin = null,
     ): array {
         $hashService = OpenIdConnectClientFixture::createHashService();
         $nonce = Nonce::generate();
@@ -415,6 +441,7 @@ class OpenIdConnectSessionModeTest extends TestCase
         OpenIdConnectClientFixture::inject($provider, 'securityContext', $securityContext);
         OpenIdConnectClientFixture::inject($provider, 'session', $this->createStub(SessionInterface::class));
         OpenIdConnectClientFixture::inject($provider, 'policyService', $policyService);
+        OpenIdConnectClientFixture::inject($provider, 'identityTokenOfLogin', $identityTokenOfLogin ?? $this->createIdentityTokenOfLogin($this->createStub(SessionInterface::class)));
         return [$provider, $token];
     }
 
@@ -444,6 +471,14 @@ class OpenIdConnectSessionModeTest extends TestCase
             ]
         ));
         return $token;
+    }
+
+    private function createIdentityTokenOfLogin(SessionInterface $session): IdentityTokenOfLogin
+    {
+        $identityTokenOfLogin = new IdentityTokenOfLogin();
+        OpenIdConnectClientFixture::inject($identityTokenOfLogin, 'session', $session);
+        OpenIdConnectClientFixture::inject($identityTokenOfLogin, 'securityContext', $this->createStub(SecurityContext::class));
+        return $identityTokenOfLogin;
     }
 
     private static function createHashServiceWithKey(string $encryptionKey): HashService
