@@ -15,6 +15,7 @@ namespace Flownative\OpenIdConnect\Client;
 
 use ArrayObject;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectProvider;
+use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectSessionToken;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
 use Flownative\OpenIdConnect\Client\Authentication\StoredRefreshToken;
 use Flownative\OpenIdConnect\Client\Tests\Unit\Fixtures\JwtFixture;
@@ -43,11 +44,11 @@ class OpenIdConnectProviderTest extends TestCase
     private const string SESSION_KEY = 'flownative_oidc_refresh:SomeProvider';
 
     #[Test]
-    public function getTokenClassNamesReturnsOpenIdConnectToken(): void
+    public function getTokenClassNamesReturnsBothTokens(): void
     {
         $provider = OpenIdConnectProvider::create('SomeProvider', []);
 
-        static::assertSame([OpenIdConnectToken::class], $provider->getTokenClassNames());
+        static::assertSame([OpenIdConnectToken::class, OpenIdConnectSessionToken::class], $provider->getTokenClassNames());
     }
 
     #[Test]

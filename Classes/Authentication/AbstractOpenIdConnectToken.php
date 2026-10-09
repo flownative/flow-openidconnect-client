@@ -28,12 +28,19 @@ abstract class AbstractOpenIdConnectToken extends AbstractToken
      */
     public const string OIDC_PARAMETER_NAME = 'flownative_oidc';
 
+    /**
+     * The values of a request are transient, because Flow stores a token which is not sessionless in the session
+     */
+    #[Flow\Transient]
     protected array $queryParameters = [];
 
+    #[Flow\Transient]
     protected array $cookies = [];
 
+    #[Flow\Transient]
     protected string $refreshToken = '';
 
+    #[Flow\Transient]
     protected string $nonceCookieName = '';
 
     #[Flow\Inject]

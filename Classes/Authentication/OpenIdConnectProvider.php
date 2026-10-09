@@ -15,13 +15,17 @@ use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use Flownative\OpenIdConnect\Client\TokenSet;
+use Flownative\OpenIdConnect\Client\ValidatedIdentityToken;
 use InvalidArgumentException;
 use Neos\Cache\Exception as CacheException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Configuration\Exception\InvalidConfigurationTypeException;
 use Neos\Flow\Log\Utility\LogEnvironment;
+use Neos\Flow\ObjectManagement\ObjectManagerInterface;
+use Neos\Flow\Persistence\PersistenceManagerInterface;
 use Neos\Flow\Security\Account;
 use Neos\Flow\Security\AccountRepository;
+use Neos\Flow\Security\Context as SecurityContext;
 use Neos\Flow\Security\Authentication\Provider\AbstractProvider;
 use Neos\Flow\Security\Authentication\TokenInterface;
 use Neos\Flow\Security\Exception as SecurityException;
@@ -41,6 +45,10 @@ use RuntimeException;
  * A token is only accepted if its signature is valid, it was issued by the expected issuer for
  * the expected audience, and it is valid at the current time. Tokens which fail one of these
  * checks lead to wrong credentials and are logged, but do not throw an exception.
+ *
+ * With an OpenIdConnectToken, the provider authenticates a transient account on every request.
+ * With an OpenIdConnectSessionToken, it signs in once to the persisted account which the
+ * configured account resolver returns, and the Flow session keeps the login.
  */
 final class OpenIdConnectProvider extends AbstractProvider
 {
@@ -77,12 +85,21 @@ final class OpenIdConnectProvider extends AbstractProvider
     #[Flow\Inject]
     protected IdentityTokenValidator $identityTokenValidator;
 
+    #[Flow\Inject]
+    protected ObjectManagerInterface $objectManager;
+
+    #[Flow\Inject]
+    protected PersistenceManagerInterface $persistenceManager;
+
+    #[Flow\Inject]
+    protected SecurityContext $securityContext;
+
     #[Flow\InjectConfiguration(path: 'middleware')]
     protected array $middlewareSettings = [];
 
     public function getTokenClassNames(): array
     {
-        return [OpenIdConnectToken::class];
+        return [OpenIdConnectToken::class, OpenIdConnectSessionToken::class];
     }
 
     /**
@@ -94,10 +111,12 @@ final class OpenIdConnectProvider extends AbstractProvider
      */
     public function authenticate(TokenInterface $authenticationToken): void
     {
-        if (!$authenticationToken instanceof OpenIdConnectToken) {
+        if (!$authenticationToken instanceof OpenIdConnectToken && !$authenticationToken instanceof OpenIdConnectSessionToken) {
             throw new UnsupportedAuthenticationTokenException(sprintf('The OpenID Connect authentication provider cannot authenticate the given token of type %s.', get_class($authenticationToken)), 1559805996);
         }
-        if (!isset($this->options['roles']) && !isset($this->options['rolesFromClaims']) && !isset($this->options['addRolesFromExistingAccount'])) {
+        if ($authenticationToken instanceof OpenIdConnectSessionToken) {
+            $this->validateSessionModeOptions();
+        } elseif (!isset($this->options['roles']) && !isset($this->options['rolesFromClaims']) && !isset($this->options['addRolesFromExistingAccount'])) {
             throw new RuntimeException('Either "roles", "rolesFromClaims" or "addRolesFromExistingAccount" must be specified in the configuration of OpenID Connect authentication provider', 1559806095);
         }
         if (!isset($this->options['serviceName'])) {
@@ -115,6 +134,11 @@ final class OpenIdConnectProvider extends AbstractProvider
             throw new RuntimeException('The "requireVerifiedEmail" option in the configuration of OpenID Connect authentication provider must be a boolean', 1789126720);
         }
 
+        if ($authenticationToken instanceof OpenIdConnectSessionToken) {
+            $this->authenticateSessionToken($authenticationToken, $leeway);
+            return;
+        }
+
         try {
             $identityToken = $authenticationToken->extractIdentityTokenFromRequest(CookieSettings::fromMiddlewareSettings($this->middlewareSettings)->getJwtCookieName($this->options));
         } catch (AuthenticationRequiredException) {
@@ -125,11 +149,8 @@ final class OpenIdConnectProvider extends AbstractProvider
             return;
         }
 
-        try {
-            // Creating the client may already contact the identity provider for discovery.
-            $client = $this->openIdConnectClientFactory->create($this->options['serviceName']);
-        } catch (ConnectionException|ServiceException $exception) {
-            $this->logger?->error(sprintf('OpenID Connect: Could not retrieve the configuration of service "%s": %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+        $client = $this->createClient();
+        if ($client === null) {
             return;
         }
 
@@ -210,6 +231,114 @@ final class OpenIdConnectProvider extends AbstractProvider
     #[Flow\Signal]
     public function emitAuthenticated(TokenInterface $authenticationToken, IdentityToken $identityToken, array $roles): void
     {
+    }
+
+    /**
+     * Signs in to the account which the account resolver returns for the identity token of a finished authorization
+     *
+     * Flow tags the session with the account, because the token is not sessionless, and renews the session identifier after the login:
+     * Neos\Flow\Package connects a slot to the signal "authenticatedToken" of the AuthenticationProviderManager for that.
+     *
+     * @throws InvalidAuthenticationStatusException
+     */
+    private function authenticateSessionToken(OpenIdConnectSessionToken $authenticationToken, int $leeway): void
+    {
+        try {
+            $identityToken = $authenticationToken->extractIdentityTokenFromRequest();
+        } catch (AuthenticationRequiredException) {
+            return;
+        } catch (SecurityException $exception) {
+            $this->logger?->notice(sprintf('OpenID Connect: Could not extract an identity token from the request: %s', $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+            return;
+        }
+
+        $client = $this->createClient();
+        if ($client === null) {
+            return;
+        }
+
+        // An expired token can't be refreshed here, because the session decides how long the login lasts
+        try {
+            $validatedIdentityToken = $this->identityTokenValidator->validate($identityToken, $client, $this->createIdentityTokenRequirements($client->getOptions(), $leeway));
+        } catch (IdentityTokenRejectedException $exception) {
+            $this->logRejectedIdentityToken($exception);
+            $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
+            return;
+        } catch (ConnectionException|ServiceException $exception) {
+            $this->logUnavailableJwks($exception);
+            return;
+        }
+
+        if ($authenticationToken->hasReceivedRefreshToken()) {
+            $this->logger?->warning(sprintf('OpenID Connect: The identity provider of service "%s" issued a refresh token, which the session mode discards. Set the entry point option "requestRefreshToken" to false.', $this->options['serviceName']), LogEnvironment::fromMethodName(__METHOD__));
+        }
+
+        $account = $this->resolveAccount($validatedIdentityToken);
+        if ($account === null) {
+            $this->logger?->notice(sprintf('OpenID Connect: No account was admitted for the identity %s of service "%s"', self::describeValue($validatedIdentityToken->accountIdentifier), $this->options['serviceName']), LogEnvironment::fromMethodName(__METHOD__));
+            $authenticationToken->setAuthenticationStatus(TokenInterface::WRONG_CREDENTIALS);
+            return;
+        }
+
+        $account->authenticationAttempted(TokenInterface::AUTHENTICATION_SUCCESSFUL);
+        // The browser returns from the identity provider with a GET request, in which Flow only persists objects which are allowed
+        if (!$this->persistenceManager->isNewObject($account)) {
+            $this->accountRepository->update($account);
+            $this->persistenceManager->allowObject($account);
+        }
+        // A refresh token which a login in the JWT mode left in the session must not outlive the switch to the session mode
+        if ($this->session->isStarted()) {
+            $this->session->putData($this->getRefreshTokenSessionKey(), null);
+        }
+        $authenticationToken->setAccount($account);
+        $authenticationToken->setAuthenticationStatus(TokenInterface::AUTHENTICATION_SUCCESSFUL);
+
+        $this->logger?->debug(sprintf('OpenID Connect: Successfully authenticated persisted account %s with authentication provider %s', self::describeValue($account->getAccountIdentifier()), $this->name), LogEnvironment::fromMethodName(__METHOD__));
+
+        $this->emitAuthenticated($authenticationToken, $validatedIdentityToken->identityToken, $this->policyService->getRoles());
+    }
+
+    /**
+     * Roles of a persisted account belong to the account, so options which add roles would change the account itself
+     */
+    private function validateSessionModeOptions(): void
+    {
+        foreach (['roles', 'rolesFromClaims', 'addRolesFromExistingAccount'] as $optionName) {
+            if (isset($this->options[$optionName])) {
+                throw new RuntimeException(sprintf('The "%s" option of the OpenID Connect authentication provider cannot be used with the %s, because the roles of a persisted account belong to the account', $optionName, OpenIdConnectSessionToken::class), 1791540872);
+            }
+        }
+        $accountResolverObjectName = $this->options['accountResolver'] ?? null;
+        if (!is_string($accountResolverObjectName) || $accountResolverObjectName === '') {
+            throw new RuntimeException(sprintf('The "accountResolver" option of the OpenID Connect authentication provider must name an implementation of %s, if it authenticates the %s', AccountResolverInterface::class, OpenIdConnectSessionToken::class), 1791540873);
+        }
+        if (isset($this->options['lookupProviderName']) && (!is_string($this->options['lookupProviderName']) || $this->options['lookupProviderName'] === '')) {
+            throw new RuntimeException('The "lookupProviderName" option of the OpenID Connect authentication provider must be the name of an authentication provider', 1791540874);
+        }
+    }
+
+    private function resolveAccount(ValidatedIdentityToken $validatedIdentityToken): ?Account
+    {
+        $accountResolver = $this->objectManager->get($this->options['accountResolver']);
+        if (!$accountResolver instanceof AccountResolverInterface) {
+            throw new RuntimeException(sprintf('The account resolver %s of the OpenID Connect authentication provider does not implement %s', $this->options['accountResolver'], AccountResolverInterface::class), 1791540875);
+        }
+        $lookupProviderName = $this->options['lookupProviderName'] ?? $this->name;
+        // Policies may restrict access to accounts, but the account of somebody who is about to sign in must be found
+        return $this->securityContext->withoutAuthorizationChecks(static fn (): ?Account => $accountResolver->resolve($validatedIdentityToken, $lookupProviderName));
+    }
+
+    /**
+     * Creating the client may already contact the identity provider for discovery
+     */
+    private function createClient(): ?OpenIdConnectClient
+    {
+        try {
+            return $this->openIdConnectClientFactory->create($this->options['serviceName']);
+        } catch (ConnectionException|ServiceException $exception) {
+            $this->logger?->error(sprintf('OpenID Connect: Could not retrieve the configuration of service "%s": %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
+            return null;
+        }
     }
 
     /**
