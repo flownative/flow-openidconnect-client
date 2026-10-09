@@ -52,13 +52,13 @@ final class OpenIdConnectClient
         'scopes_supported' => 'scopesSupported'
     ];
 
-    /**
-     * Service name which identifies the configuration of this OpenID Connect Client instance
-     */
     private const int ACCESS_TOKEN_RENEWAL_MARGIN = 30; # seconds before expiration
 
     private const int MINIMUM_JWKS_RELOAD_INTERVAL = 60; # seconds
 
+    /**
+     * Service name which identifies the configuration of this OpenID Connect Client instance
+     */
     private string $serviceName;
 
     private array $options = [];
