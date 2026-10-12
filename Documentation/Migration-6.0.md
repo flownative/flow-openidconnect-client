@@ -25,7 +25,7 @@ longer used.
 | [Rejected logins](#rejected-logins)                           | users can end up with a rejected login, for example with an unverified email address                            |
 | [Status 401 for scripts](#status-401-for-scripts-and-api-clients) | your frontend loads content with XHR, fetch or HTMX                                                         |
 | [Refresh tokens](#refresh-tokens)                             | your code calls `OpenIdConnectClient::refreshIdentityToken()`                                                   |
-| [Client credentials](#client-credentials)                     | your code calls `OpenIdConnectClient::getAccessToken()` with a scope                                            |
+| [Client credentials](#client-credentials)                     | your code calls `OpenIdConnectClient::getAccessToken()` (deprecated since 6.1) with a scope                     |
 | [Changed APIs](#changes-for-code-which-uses-the-package-directly) | your code uses classes of this package directly                                                              |
 
 ## Requirements
@@ -320,6 +320,12 @@ page, which then starts the login.
   more when their identity token expires.
 
 ## Client Credentials
+
+`OpenIdConnectClient::getAccessToken()` is deprecated since version 6.1.
+Use `getClientCredentialsAccessToken()` instead, which takes the client
+id, secret and additional parameters from the configuration of the
+service, see the [upgrade notes for 6.1](Upgrade-6.1.md#client-credentials).
+Both methods send the scope in the same way.
 
 `OpenIdConnectClient::getAccessToken()` no longer adds "openid" to the
 scope, and flownative/oauth2-client 5.0 now sends the scope to the
