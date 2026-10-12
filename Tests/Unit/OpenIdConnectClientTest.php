@@ -119,6 +119,7 @@ class OpenIdConnectClientTest extends TestCase
     {
         return [
             'nonce, which belongs to the login' => [['nonce' => 'chosen-by-the-caller'], 1791540882],
+            'state, which the OAuth client sets' => [['state' => 'chosen-by-the-caller'], 1791540882],
             'parameter without a name' => [['login'], 1791540883],
             'parameter which is not a string' => [['max_age' => 300], 1791540883],
         ];
