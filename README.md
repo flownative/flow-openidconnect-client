@@ -1,6 +1,6 @@
 [![MIT license](http://img.shields.io/badge/license-MIT-brightgreen.svg)](http://opensource.org/licenses/MIT)
 [![Packagist](https://img.shields.io/packagist/v/flownative/openidconnect-client.svg)](https://packagist.org/packages/flownative/openidconnect-client)
-![CI](https://github.com/flownative/flow-openidconnect-client/workflows/CI/badge.svg?branch=master)
+![CI](https://github.com/flownative/flow-openidconnect-client/workflows/CI/badge.svg?branch=main)
 [![Maintenance level: Love](https://img.shields.io/badge/maintenance-%E2%99%A1%E2%99%A1%E2%99%A1-ff69b4.svg)](https://www.flownative.com/en/products/open-source.html)
 
 # OpenID Connect Client for Flow Framework
@@ -19,7 +19,8 @@ data contained in the ID token is usually signed and can optionally be
 encrypted.
 
 Upgrading from version 5? Read the
-[migration guide](Documentation/Migration-6.0.md).
+[migration guide](Documentation/Migration-6.0.md). Upgrading from
+version 6.0? Read the [upgrade notes for 6.1](Documentation/Upgrade-6.1.md).
 
 ## Feature Overview
 
@@ -131,7 +132,9 @@ What you need is:
 
 - configure the discovery URI for your identity provider
 - configure Flow to use this plugin as an authentication provider
-- configure the HTTP chain to manage JWT session cookies
+- decide whether the login is kept in a JWT cookie, which this plugin
+  manages with its own HTTP middleware, or in a Flow session of a
+  persisted account (see "Session Mode with Persisted Accounts")
 - configure Flow and this plugin to set user roles
 
 You will use the
@@ -148,7 +151,6 @@ third party's services accessing an API provided by your application.
 - configure the discovery URI for your identity provider
 - configure Flow to use this plugin as a (second) authentication
   provider
-- configure the HTTP chain to manage JWT session cookies
 - configure Flow and this plugin to set user roles
 - protect your API methods and evaluate further permissions obtained
   from the identity token
@@ -235,11 +237,12 @@ from a terminal:
 
 ## Requests to the Identity Provider
 
-All requests of this package to the identity provider, for discovery,
-keys, codes and tokens, use an HTTP client with time limits, so that an
-identity provider which doesn't answer can't keep a request or a worker
-waiting. The defaults are 5 seconds for the connection and 10 seconds
-for the whole answer:
+The client of this package sends all its requests to the identity
+provider, for discovery, keys, codes and tokens, with time limits, so
+that an identity provider which doesn't answer can't keep a request or
+a worker waiting. The defaults are 5 seconds for the connection and 10
+seconds for the whole answer. Only the command `./flow oidc:discover`
+waits without a limit.
 
 ```yaml
 Flownative:
@@ -283,6 +286,11 @@ web browser. The typical application flow goes like this:
    cookie
 7. during the following web requests, the browser sends the cookie and Flow
    recognizes the user as being authenticated
+
+These steps describe the default mode, which keeps the login in a JWT
+cookie. In the session mode, an ordinary Flow session of a persisted
+account holds the login instead, see "Session Mode with Persisted
+Accounts".
 
 The Flow application needs a client identifier and a client secret so it
 can request authorization codes from the identity provider.
@@ -395,8 +403,8 @@ If a login is rejected when the browser returns, the entry point
 doesn't start another login, because the identity provider would
 usually send the user back right away and the login would be rejected
 again. Instead, it answers with status 403 and a short page with a link
-to try again. Logins which are in progress while you update this package
-end on this page once.
+to try again. If "loginFailedRedirectUri" is configured, it redirects
+the browser to that page with status 303 instead, see "Failed Logins".
 
 If you start an authorization yourself, pass a new nonce to
 `OpenIdConnectClient::startAuthorization()` and set its cookie on the
@@ -710,6 +718,21 @@ The important bit is that your code uses the OpenID Connect Client to
 retrieve an access token and then sends that as part of an authorization
 header to the API.
 
+`getClientCredentialsAccessToken($scope = '', $additionalParameters = [])`
+replaces `getAccessToken()`, which is deprecated since version 6.1. It
+uses the service of the client and takes the client id and secret,
+and the "additionalParameters", from the configuration of the service. Parameters
+which you pass as second argument replace configured parameters of the
+same name. If the client id or the secret is empty, it throws a
+`ConfigurationException`.
+
+You can check the configuration from a terminal. The following command
+requests an access token with the scope "profile name" and prints it:
+
+```
+./flow oidc:getAccessToken test
+```
+
 The application *providing* the API needs the following configuration,
 likely using a different client id and secret than the consuming app:
 
@@ -731,33 +754,37 @@ this:
 ```php
 abstract class AbstractApiController extends ActionController
 {
-    /**
-     * @Flow\Inject
-     * @var Context
-     */
-    protected $securityContext;
+    #[Flow\Inject]
+    protected Context $securityContext;
 
-    /**
-     * @var IdentityToken|null
-     */
-    protected $identityToken;
+    protected ?IdentityToken $identityToken = null;
 
-    /**
-     * @return void
-     */
-    public function initializeAction()
+    protected function initializeAction(): void
     {
         parent::initializeAction();
 
-        $account = $this->securityContext->getAccount();
-        $identityToken = $account->getCredentialsSource();
-        if ($identityToken instanceof IdentityToken) {
-            $this->identityToken = $identityToken;
+        // The provider has validated the token and keeps the JWT as credentials source of the transient account
+        $jwt = $this->securityContext->getAccount()?->getCredentialsSource();
+        if (is_string($jwt)) {
+            $this->identityToken = IdentityToken::fromJwt($jwt);
         }
     }
 }
+```
 
-````
+To check the scopes which were granted to the client, use
+`IdentityToken::scopeContains()`:
+
+```php
+if ($this->identityToken === null || !$this->identityToken->scopeContains('billing:read')) {
+    $this->throwStatus(403);
+}
+```
+
+The method reads the "scope" claim, whose identifiers are separated by
+whitespace, as OAuth 2.0 defines it. It also reads the "scp" claim,
+which some identity providers like Microsoft Entra ID use instead, as a
+string or as a list.
 
 ## Roles from Identity Token
 
@@ -1041,12 +1068,22 @@ try {
     );
 } catch (IdentityTokenRejectedException $exception) {
     // The message says why, for example "its audience … contains none of …"
+    $this->throwStatus(401);
 } catch (ConnectionException|ServiceException $exception) {
     // The key set of the identity provider could not be retrieved
+    $this->throwStatus(503);
 }
 
 $accountIdentifier = $validatedIdentityToken->accountIdentifier;
 ```
+
+`IdentityTokenRequirements` needs at least one issuer and one audience,
+otherwise its constructor throws an `InvalidArgumentException`. The
+authorized party is a required argument: pass the client id to check
+"azp" like the provider does, or null to not check it at all. The
+other arguments are optional. By default, the claim "sub" identifies
+the account, an "email" claim used instead must be verified, the
+leeway is 60 seconds, and the nonce is not checked.
 
 The validator takes the keys from the client, and reloads them for a
 token which names an unknown key, as described above.
