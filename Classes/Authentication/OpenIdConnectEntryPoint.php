@@ -58,7 +58,7 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         $nonce = Nonce::generate();
         $client = $this->openIdConnectClientFactory->create($this->options['serviceName']);
         try {
-            $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '', $nonce, $this->options['requestRefreshToken'] ?? true);
+            $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '', $nonce, $this->options['requestRefreshToken'] ?? true, $this->options['authorizationParameters'] ?? []);
         } catch (OAuthClientException | ServiceException $exception) {
             $this->logger?->error(sprintf('OpenID Connect: Authentication for service "%s" failed: %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return $response;
@@ -102,6 +102,14 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         if (isset($this->options['requestRefreshToken']) && !is_bool($this->options['requestRefreshToken'])) {
             throw new ConfigurationException('OpenID Connect: "requestRefreshToken" option must be a boolean for OpenIdConnectEntryPoint', 1789108753);
         }
+        $authorizationParameters = $this->options['authorizationParameters'] ?? [];
+        if (!is_array($authorizationParameters) || array_filter($authorizationParameters, static fn (mixed $value, mixed $name): bool => !is_string($name) || $name === '' || !is_string($value), ARRAY_FILTER_USE_BOTH) !== []) {
+            throw new ConfigurationException('OpenID Connect: "authorizationParameters" option must map parameter names to strings for OpenIdConnectEntryPoint', 1791540884);
+        }
+        $loginFailedRedirectUri = $this->options['loginFailedRedirectUri'] ?? null;
+        if ($loginFailedRedirectUri !== null && !self::isRedirectTarget($loginFailedRedirectUri)) {
+            throw new ConfigurationException('OpenID Connect: "loginFailedRedirectUri" option must be a path starting with "/" or an absolute http(s) URI for OpenIdConnectEntryPoint', 1791540885);
+        }
     }
 
     /**
@@ -125,10 +133,37 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
     }
 
     /**
-     * The link to try again leads to the same page, without the parameters of the rejected login
+     * A path of this site or an absolute address, but no path starting with "//" or "/\", which browsers read as an address of another host
+     *
+     * Browsers also drop tabs and line breaks before they read an address, so whitespace and control characters are not accepted at all.
+     */
+    private static function isRedirectTarget(mixed $uri): bool
+    {
+        if (!is_string($uri) || preg_match('/[\x00-\x20\x7f]/', $uri) === 1) {
+            return false;
+        }
+        if (str_starts_with($uri, '/')) {
+            return !str_starts_with($uri, '//') && !str_starts_with($uri, '/\\');
+        }
+        return in_array(parse_url($uri, PHP_URL_SCHEME), ['https', 'http'], true) && is_string(parse_url($uri, PHP_URL_HOST));
+    }
+
+    /**
+     * Sends the browser to the page of the application configured for a failed login, or shows a page of its own with a link to try
+     * again, which leads to the same page without the parameters of the rejected login
+     *
+     * The configured page must be reachable without a login, or this entry point starts the rejected login again, in an endless loop.
      */
     private function createLoginFailedResponse(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
     {
+        $loginFailedRedirectUri = $this->options['loginFailedRedirectUri'] ?? null;
+        if (is_string($loginFailedRedirectUri)) {
+            return $response
+                ->withStatus(303)
+                ->withHeader('Location', $loginFailedRedirectUri)
+                ->withHeader('Cache-Control', 'no-store');
+        }
+
         $queryParameters = Query::parse($request->getUri()->getQuery());
         unset(
             $queryParameters[OpenIdConnectToken::OIDC_PARAMETER_NAME],
