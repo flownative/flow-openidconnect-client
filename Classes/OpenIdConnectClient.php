@@ -175,6 +175,32 @@ final class OpenIdConnectClient
     }
 
     /**
+     * Returns an access token of the Client Credentials Grant for this service, with the client id and secret of its configuration
+     *
+     * Additional parameters, for example the audience of an API, are taken from the option "additionalParameters" of the service; the
+     * given ones take precedence. The token is cached and renewed shortly before it expires, see getAccessToken().
+     *
+     * @param string $scope Identifiers separated by space. With an empty scope, the identity provider uses its default scope
+     * @param array $additionalParameters Parameters for the token request, for example ['audience' => 'https://www.example.com/api/v1']
+     * @throws AuthenticationException
+     * @throws ConfigurationException
+     * @throws ConnectionException
+     * @throws IdentityProviderException
+     * @throws GuzzleException
+     * @throws SodiumException
+     */
+    public function getClientCredentialsAccessToken(string $scope = '', array $additionalParameters = []): AccessToken
+    {
+        $clientId = $this->options['clientId'];
+        $clientSecret = $this->options['clientSecret'];
+        if (!is_string($clientId) || $clientId === '' || !is_string($clientSecret) || $clientSecret === '') {
+            throw new ConfigurationException(sprintf('OpenID Connect Client: The service "%s" needs a "clientId" and a "clientSecret" for the Client Credentials Grant.', $this->serviceName), 1791540881);
+        }
+        $configuredParameters = $this->options['additionalParameters'] ?? [];
+        return $this->getAccessToken($this->serviceName, $clientId, $clientSecret, $scope, array_merge(is_array($configuredParameters) ? $configuredParameters : [], $additionalParameters));
+    }
+
+    /**
      * Returns an OAuth access token of the Client Credentials Flow for machine-to-machine applications
      *
      * This method will check if an access token already exists (stored in an Authorization record), and
@@ -182,6 +208,7 @@ final class OpenIdConnectClient
      * Authorization record is deterministic and derived from the service name, client id, scope and
      * additional parameters.
      *
+     * @deprecated Use getClientCredentialsAccessToken(), which takes the service name, client id and secret of this client
      * @param string $serviceName The service name used in the OAuth configuration
      * @param string $scope The authorization scope. Must be identifiers separated by space. With an empty scope, the identity provider uses its default scope
      * @param array $additionalParameters Additional parameters to provide in the request body while requesting the token. For example ['audience' => 'https://www.example.com/api/v1']
@@ -359,8 +386,8 @@ final class OpenIdConnectClient
             $response = $this->httpClient()->request('POST', $tokenEndpoint, [
                 'form_params' => [
                     'grant_type' => 'refresh_token',
-                    'client_id' => $this->settings['services'][$this->serviceName]['options']['clientId'],
-                    'client_secret' => $this->settings['services'][$this->serviceName]['options']['clientSecret'],
+                    'client_id' => $this->options['clientId'],
+                    'client_secret' => $this->options['clientSecret'],
                     'refresh_token' => $refreshToken,
                 ]
             ]);
