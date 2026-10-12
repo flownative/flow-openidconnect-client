@@ -65,6 +65,28 @@ class OpenIdConnectEntryPointTest extends TestCase
         $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/'), new Response());
     }
 
+    public static function reservedAuthorizationParameters(): array
+    {
+        return [
+            'nonce, which the client sets' => [['nonce' => 'chosen-in-the-configuration']],
+            'state, which the OAuth client sets' => [['state' => 'chosen-in-the-configuration']],
+            'redirect_uri, which the OAuth client sets' => [['prompt' => 'login', 'redirect_uri' => 'https://evil.example.com/']],
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('reservedAuthorizationParameters')]
+    public function startAuthenticationRejectsReservedAuthorizationParametersAsConfigurationError(array $authorizationParameters): void
+    {
+        $oAuthClient = $this->createMock(OAuthClient::class);
+        $oAuthClient->expects($this->never())->method('startAuthorization');
+        $entryPoint = $this->createEntryPoint($oAuthClient, ['serviceName' => 'test', 'authorizationParameters' => $authorizationParameters]);
+
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionCode(1791799612);
+        $entryPoint->startAuthentication(new ServerRequest('GET', 'https://www.example.com/secure'), new Response());
+    }
+
     #[Test]
     public function startAuthenticationRedirectsToAuthorizationEndpoint(): void
     {

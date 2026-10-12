@@ -6,6 +6,7 @@ use Flownative\OAuth2\Client\OAuthClientException;
 use Flownative\OpenIdConnect\Client\ConfigurationException;
 use Flownative\OpenIdConnect\Client\CookieSettings;
 use Flownative\OpenIdConnect\Client\OAuthClient;
+use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use GuzzleHttp\Psr7\Query;
@@ -105,6 +106,10 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         $authorizationParameters = $this->options['authorizationParameters'] ?? [];
         if (!is_array($authorizationParameters) || array_filter($authorizationParameters, static fn (mixed $value, mixed $name): bool => !is_string($name) || $name === '' || !is_string($value), ARRAY_FILTER_USE_BOTH) !== []) {
             throw new ConfigurationException('OpenID Connect: "authorizationParameters" option must map parameter names to strings for OpenIdConnectEntryPoint', 1791540884);
+        }
+        $reservedParameterNames = array_intersect(array_keys($authorizationParameters), OpenIdConnectClient::RESERVED_AUTHORIZATION_PARAMETER_NAMES);
+        if ($reservedParameterNames !== []) {
+            throw new ConfigurationException(sprintf('OpenID Connect: "authorizationParameters" option must not contain "%s", because the client sets these parameters itself, for OpenIdConnectEntryPoint', implode('", "', $reservedParameterNames)), 1791799612);
         }
         $loginFailedRedirectUri = $this->options['loginFailedRedirectUri'] ?? null;
         if ($loginFailedRedirectUri !== null && !self::isRedirectTarget($loginFailedRedirectUri)) {

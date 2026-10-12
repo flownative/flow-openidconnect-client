@@ -33,6 +33,11 @@ use SodiumException;
 
 final class OpenIdConnectClient
 {
+    /**
+     * Parameters of the authorization request which this client or the OAuth client set themselves
+     */
+    public const array RESERVED_AUTHORIZATION_PARAMETER_NAMES = ['nonce', 'client_id', 'client_secret', 'redirect_uri', 'response_type', 'response_mode', 'scope', 'state', 'code_challenge', 'code_challenge_method', 'request', 'request_uri'];
+
     private const array DEFAULT_OPTIONS = [
         'issuer' => '',
         'clientId' => '',
@@ -262,6 +267,7 @@ final class OpenIdConnectClient
      * @param string $scope The authorization scope. Must be identifiers separated by space. "openid" will automatically be requested
      * @param bool $requestRefreshToken If "offline_access" should be requested, so that an expired identity token can be refreshed
      * @param array<string, string> $authorizationParameters Further parameters of the authorization request, like "prompt", "login_hint" or "ui_locales" (OpenID Connect Core 1.0, section 3.1.2.1), or ones of the identity provider like "screen_hint". Those which the client sets itself are rejected
+     * @throws InvalidArgumentException if the authorization parameters contain a reserved name or a value which is not a string
      * @throws OAuthClientException
      */
     public function startAuthorization(UriInterface $returnToUri, string $scope, Nonce $nonce, bool $requestRefreshToken = true, array $authorizationParameters = []): UriInterface
@@ -526,13 +532,11 @@ final class OpenIdConnectClient
         return $this->httpClient ??= $this->httpClientFactory->create();
     }
 
-    /**
-     * The nonce belongs to the login and is set here; the OAuth client rejects the other parameters it sets itself, like the state
-     */
     private static function validateAuthorizationParameters(array $authorizationParameters): void
     {
-        if (array_key_exists('nonce', $authorizationParameters)) {
-            throw new InvalidArgumentException('OpenID Connect Client: The authorization parameters must not contain "nonce", because the client sets it itself.', 1791540882);
+        $reservedParameterNames = array_intersect(array_keys($authorizationParameters), self::RESERVED_AUTHORIZATION_PARAMETER_NAMES);
+        if ($reservedParameterNames !== []) {
+            throw new InvalidArgumentException(sprintf('OpenID Connect Client: The authorization parameters must not contain "%s", because the client sets them itself.', implode('", "', $reservedParameterNames)), 1791540882);
         }
         foreach ($authorizationParameters as $name => $value) {
             if (!is_string($name) || $name === '' || !is_string($value)) {
