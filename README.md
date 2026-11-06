@@ -478,6 +478,32 @@ The redirect URI must use HTTPS, because the relay receives the
 authorization code. Only with insecure login cookies, for development
 without HTTPS, an `http://` redirect URI is accepted.
 
+Both options can come from environment variables. An empty
+`redirectUri` and a `stateSigning` with an empty `keyId` and an empty
+`secretKey` count as not configured, so one configuration can enable
+the relay for some installations and leave it off for others. Set the
+key pair together or leave it empty together: only one of the two keys
+is refused, and with both empty but a `redirectUri` set, no state is
+signed, the client logs an error and sign-ins through the relay fail.
+`allowedHostPatterns` also accepts a comma-separated string, and an
+empty `knownTargetHosts` counts as not configured. Up to version 6.2,
+an empty `keyId` and `secretKey` were refused as an invalid key.
+
+The following options replace those of the example above. With the
+type `string`, an unset variable becomes an empty string; a plain
+`%env:NAME%` yields `false` for an unset variable, which the client
+refuses as an invalid configuration:
+
+```yaml
+            redirectUri: '%env(string):OIDC_RELAY_URI%'
+            stateSigning:
+              keyId: '%env(string):OIDC_STATE_SIGNING_KEY_ID%'
+              secretKey: '%env(string):OIDC_STATE_SIGNING_KEY%'
+              # For example "acme.example.com, *.cell-1.example.com"
+              allowedHostPatterns: '%env(string):OIDC_STATE_SIGNING_HOSTS%'
+              knownTargetHosts: 'Acme\Tenancy\KnownTenantHosts'
+```
+
 Configure `redirectUri` together with `stateSigning`. A redirect URI of
 another host without a signed state can't be forwarded, and the OAuth
 client logs a warning when a login starts.
