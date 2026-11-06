@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace Flownative\OpenIdConnect\Client;
 
 use Flownative\OAuth2\Client\OAuthClient as BaseOAuthClient;
+use Flownative\OAuth2\Client\StateSigner;
 use GuzzleHttp\ClientInterface;
 use Neos\Flow\Annotations as Flow;
 
@@ -106,6 +107,24 @@ class OAuthClient extends BaseOAuthClient
             throw new ConfigurationException(sprintf('Missing configuration clientSecret for client id "%s" of service "%s" (%s). Configure it explicitly via settings.', $clientId, $this->getServiceName(), self::getServiceType()), 1789395653);
         }
         return $this->options['clientSecret'];
+    }
+
+    /**
+     * The "redirectUri" option of the service lets all returns arrive at a relay
+     */
+    protected function getRedirectUri(): ?string
+    {
+        $this->initializeOptionsIfNeeded();
+        return $this->openIdConnectClient->getRedirectUri();
+    }
+
+    /**
+     * The "stateSigning" option of the service lets the relay know where to forward a return
+     */
+    protected function getStateSigner(): ?StateSigner
+    {
+        $this->initializeOptionsIfNeeded();
+        return $this->openIdConnectClient->getStateSigner();
     }
 
     public static function getServiceType(): string

@@ -10,6 +10,7 @@ use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use Flownative\OpenIdConnect\Client\OpenIdConnectClientFactory;
 use Flownative\OpenIdConnect\Client\ServiceException;
 use GuzzleHttp\Psr7\Query;
+use InvalidArgumentException;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Http\ContentStream;
 use Neos\Flow\Log\Utility\LogEnvironment;
@@ -60,7 +61,7 @@ final class OpenIdConnectEntryPoint extends AbstractEntryPoint
         $client = $this->openIdConnectClientFactory->create($this->options['serviceName']);
         try {
             $providerUri = $client->startAuthorization($request->getUri(), $this->options['scope'] ?? '', $nonce, $this->options['requestRefreshToken'] ?? true, $this->options['authorizationParameters'] ?? []);
-        } catch (OAuthClientException | ServiceException $exception) {
+        } catch (OAuthClientException | ServiceException | InvalidArgumentException $exception) {
             $this->logger?->error(sprintf('OpenID Connect: Authentication for service "%s" failed: %s', $this->options['serviceName'], $exception->getMessage()), LogEnvironment::fromMethodName(__METHOD__));
             return $response;
         }

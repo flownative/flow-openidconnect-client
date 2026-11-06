@@ -18,6 +18,7 @@ use Flownative\OpenIdConnect\Client\OpenIdConnectClient;
 use GuzzleHttp\Client as HttpClient;
 use Neos\Cache\Backend\TransientMemoryBackend;
 use Neos\Cache\Frontend\VariableFrontend;
+use Neos\Flow\ObjectManagement\ObjectManagerInterface;
 use Neos\Flow\Security\Cryptography\HashService;
 use Psr\Log\LoggerInterface;
 use ReflectionProperty;
@@ -40,7 +41,7 @@ final class OpenIdConnectClientFixture
     /**
      * @param array $serviceOptions Options which replace the default options of the test service
      */
-    public static function createClient(OAuthClient $oAuthClient, HashService $hashService, LoggerInterface $logger, array $jwks = [], ?HttpClient $httpClient = null, array $serviceOptions = []): OpenIdConnectClient
+    public static function createClient(OAuthClient $oAuthClient, HashService $hashService, LoggerInterface $logger, array $jwks = [], ?HttpClient $httpClient = null, array $serviceOptions = [], ?ObjectManagerInterface $objectManager = null, array $middlewareSettings = []): OpenIdConnectClient
     {
         $discoveryCache = new VariableFrontend('discovery', new TransientMemoryBackend());
         $discoveryCache->initializeObject();
@@ -71,6 +72,10 @@ final class OpenIdConnectClientFixture
         if ($httpClient !== null) {
             self::inject($client, 'httpClient', $httpClient);
         }
+        if ($objectManager !== null) {
+            self::inject($client, 'objectManager', $objectManager);
+        }
+        self::inject($client, 'middlewareSettings', $middlewareSettings);
         $client->initializeObject();
 
         // initializeObject() creates its own OAuth client, so the test double is injected afterwards.

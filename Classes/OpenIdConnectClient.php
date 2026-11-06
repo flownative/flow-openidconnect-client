@@ -8,6 +8,7 @@ use Doctrine\ORM\OptimisticLockException;
 use Exception;
 use Flownative\OAuth2\Client\Authorization;
 use Flownative\OAuth2\Client\OAuthClientException;
+use Flownative\OAuth2\Client\StateSigner;
 use Flownative\OAuth2\Client\UnknownAuthorizationHandleException;
 use Flownative\OpenIdConnect\Client\Authentication\Nonce;
 use Flownative\OpenIdConnect\Client\Authentication\OpenIdConnectToken;
@@ -24,6 +25,7 @@ use Neos\Cache\Exception as CacheException;
 use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Log\Utility\LogEnvironment;
+use Neos\Flow\ObjectManagement\ObjectManagerInterface;
 use Neos\Flow\Security\Cryptography\HashService;
 use Neos\Utility\Arrays;
 use Psr\Http\Message\UriInterface;
@@ -73,6 +75,8 @@ final class OpenIdConnectClient
 
     private OAuthClient $oAuthClient;
 
+    private ?StateSigner $stateSigner = null;
+
     #[Flow\InjectConfiguration]
     protected array $settings;
 
@@ -92,6 +96,9 @@ final class OpenIdConnectClient
 
     #[Flow\Inject]
     protected HttpClientFactoryInterface $httpClientFactory;
+
+    #[Flow\Inject]
+    protected ObjectManagerInterface $objectManager;
 
     /**
      * Not typed, because Flow injects the caches configured in Objects.yaml lazily and the dependency proxy would not match the type.
@@ -139,6 +146,16 @@ final class OpenIdConnectClient
         if ($endSessionEndpoint !== '' && !self::isAbsoluteHttpUri($endSessionEndpoint)) {
             throw new ConfigurationException(sprintf('OpenID Connect Client: The end session endpoint of service "%s" is not an absolute URI.', $this->serviceName), 1791540876);
         }
+        if (($this->options['redirectUri'] ?? '') !== '' && !self::isAbsoluteHttpUri($this->options['redirectUri'])) {
+            throw new ConfigurationException(sprintf('OpenID Connect Client: The redirect URI of service "%s" is not an absolute URI.', $this->serviceName), 1793956456);
+        }
+        // The relay receives the code, which must not travel in clear outside of development without HTTPS
+        if (($this->options['redirectUri'] ?? '') !== '' && parse_url($this->options['redirectUri'], PHP_URL_SCHEME) !== 'https' && CookieSettings::fromMiddlewareSettings($this->middlewareSettings)->secure) {
+            throw new ConfigurationException(sprintf('OpenID Connect Client: The redirect URI of service "%s" must use HTTPS, unless the login cookies are not secure.', $this->serviceName), 1793957289);
+        }
+        if (isset($this->options['stateSigning'])) {
+            $this->stateSigner = $this->createStateSigner($this->options['stateSigning']);
+        }
 
         $this->oAuthClient = new OAuthClient($this->serviceName);
         $this->oAuthClient->setOpenIdConnectClient($this);
@@ -147,6 +164,23 @@ final class OpenIdConnectClient
     public function getOptions(): array
     {
         return $this->options;
+    }
+
+    /**
+     * Returns the configured redirect URI of a relay, or null for the finish authorization URI of the current host
+     */
+    public function getRedirectUri(): ?string
+    {
+        $redirectUri = $this->options['redirectUri'] ?? '';
+        return $redirectUri === '' ? null : $redirectUri;
+    }
+
+    /**
+     * Returns the signer which names the current host in the state, so that a relay can forward the return, or null for a random state
+     */
+    public function getStateSigner(): ?StateSigner
+    {
+        return $this->stateSigner;
     }
 
     /**
@@ -530,6 +564,40 @@ final class OpenIdConnectClient
     private function httpClient(): ClientInterface
     {
         return $this->httpClient ??= $this->httpClientFactory->create();
+    }
+
+    /**
+     * @throws ConfigurationException
+     */
+    private function createStateSigner(mixed $stateSigningOptions): StateSigner
+    {
+        $knownTargetHostsObjectName = $stateSigningOptions['knownTargetHosts'] ?? null;
+        if (!is_array($stateSigningOptions)
+            || !is_string($stateSigningOptions['keyId'] ?? null)
+            || !is_string($stateSigningOptions['secretKey'] ?? null)
+            || !is_array($stateSigningOptions['allowedHostPatterns'] ?? null)
+            || ($knownTargetHostsObjectName !== null && !is_string($knownTargetHostsObjectName))
+        ) {
+            throw new ConfigurationException(sprintf('OpenID Connect Client: The option "stateSigning" of service "%s" needs the strings "keyId" and "secretKey", the list "allowedHostPatterns" and optionally the object name "knownTargetHosts".', $this->serviceName), 1793956457);
+        }
+        $wildcardPatterns = array_filter($stateSigningOptions['allowedHostPatterns'], static fn (mixed $pattern): bool => is_string($pattern) && str_starts_with($pattern, '*.'));
+        // Without the check, a name under the wildcard which no tenant owns any more would receive the codes of other users
+        if ($wildcardPatterns !== [] && $knownTargetHostsObjectName === null) {
+            throw new ConfigurationException(sprintf('OpenID Connect Client: The option "stateSigning" of service "%s" needs "knownTargetHosts", because its allowed host patterns contain the wildcard "%s".', $this->serviceName, reset($wildcardPatterns)), 1793957288);
+        }
+        $isKnownTargetHost = null;
+        if ($knownTargetHostsObjectName !== null) {
+            $knownTargetHosts = $this->objectManager->get($knownTargetHostsObjectName);
+            if (!$knownTargetHosts instanceof KnownTargetHostsInterface) {
+                throw new ConfigurationException(sprintf('OpenID Connect Client: The known target hosts %s of service "%s" do not implement %s.', $knownTargetHostsObjectName, $this->serviceName, KnownTargetHostsInterface::class), 1793956458);
+            }
+            $isKnownTargetHost = $knownTargetHosts->isKnownTargetHost(...);
+        }
+        try {
+            return StateSigner::fromBase64EncodedSecretKey($stateSigningOptions['keyId'], $stateSigningOptions['secretKey'], array_values($stateSigningOptions['allowedHostPatterns']), $isKnownTargetHost);
+        } catch (InvalidArgumentException $exception) {
+            throw new ConfigurationException(sprintf('OpenID Connect Client: The option "stateSigning" of service "%s" is invalid: %s', $this->serviceName, $exception->getMessage()), 1793956459, $exception);
+        }
     }
 
     private static function validateAuthorizationParameters(array $authorizationParameters): void
