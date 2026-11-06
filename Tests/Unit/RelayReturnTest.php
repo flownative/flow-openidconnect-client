@@ -219,6 +219,55 @@ class RelayReturnTest extends TestCase
         self::assertSame(self::HOST, $this->createStateVerifier()->verify(self::getState($authorizationUri))->targetHost);
     }
 
+    #[Test]
+    public function clientSignsNoStateIfTheRelayOptionsAreEmptyStrings(): void
+    {
+        $client = $this->createClientOnHost(['redirectUri' => '', 'stateSigning' => ['keyId' => '', 'secretKey' => '', 'allowedHostPatterns' => '', 'knownTargetHosts' => '']]);
+
+        $authorizationUri = $client->startAuthorization(new Uri(self::RETURN_TO_URI), 'profile', Nonce::generate());
+
+        self::assertNull($client->getRedirectUri());
+        self::assertNull($client->getStateSigner());
+        self::assertMatchesRegularExpression('/^[a-f0-9]{32}\z/', self::getState($authorizationUri));
+    }
+
+    #[Test]
+    public function clientLogsAnErrorIfTheRedirectUriIsSetButTheSigningKeysAreEmpty(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error');
+        $client = $this->createClientOnHost(self::relayOptions(['keyId' => '', 'secretKey' => '']), logger: $logger);
+
+        self::assertNull($client->getStateSigner());
+    }
+
+    #[Test]
+    public function clientSignsExactHostPatternsWithoutKnownTargetHosts(): void
+    {
+        $client = $this->createClientOnHost(self::relayOptions(['allowedHostPatterns' => self::HOST, 'knownTargetHosts' => '']));
+
+        $authorizationUri = $client->startAuthorization(new Uri(self::RETURN_TO_URI), 'profile', Nonce::generate());
+
+        $stateVerifier = new StateVerifier([StateVerificationKey::fromBase64EncodedPublicKey(self::KEY_ID, $this->stateSigningKeyPair['publicKey'], [self::HOST])]);
+        self::assertSame(self::HOST, $stateVerifier->verify(self::getState($authorizationUri))->targetHost);
+    }
+
+    #[Test]
+    public function clientAcceptsAllowedHostPatternsAsCommaSeparatedString(): void
+    {
+        $knownTargetHosts = new class implements KnownTargetHostsInterface {
+            public function isKnownTargetHost(string $targetHost): bool
+            {
+                return true;
+            }
+        };
+        $client = $this->createClientOnHost(self::relayOptions(['allowedHostPatterns' => ' acme.example.com, ,*.cell-1.example.com ,']), $knownTargetHosts);
+
+        $authorizationUri = $client->startAuthorization(new Uri(self::RETURN_TO_URI), 'profile', Nonce::generate());
+
+        self::assertSame(self::HOST, $this->createStateVerifier()->verify(self::getState($authorizationUri))->targetHost);
+    }
+
     public static function invalidRelayOptions(): array
     {
         return [
@@ -228,6 +277,12 @@ class RelayReturnTest extends TestCase
             'state signing which is no array' => [['stateSigning' => 'cell-1'], 1793956457],
             'secret key which is no Ed25519 key' => [['stateSigning' => ['keyId' => self::KEY_ID, 'secretKey' => base64_encode('short'), 'allowedHostPatterns' => ['acme.cell-1.example.com']]], 1793956459],
             'wildcard without known target hosts' => [['stateSigning' => ['keyId' => self::KEY_ID, 'secretKey' => base64_encode(str_repeat('k', SODIUM_CRYPTO_SIGN_SECRETKEYBYTES)), 'allowedHostPatterns' => ['acme.example.com', '*.cell-1.example.com']]], 1793957288],
+            'state signing without secret key' => [['stateSigning' => ['keyId' => self::KEY_ID, 'secretKey' => '', 'allowedHostPatterns' => '*.cell-1.example.com', 'knownTargetHosts' => 'Acme\KnownTargetHosts']], 1793980403],
+            'state signing without key id but with secret key' => [['stateSigning' => ['keyId' => '', 'secretKey' => base64_encode(str_repeat('k', SODIUM_CRYPTO_SIGN_SECRETKEYBYTES)), 'allowedHostPatterns' => '*.cell-1.example.com', 'knownTargetHosts' => 'Acme\KnownTargetHosts']], 1793980403],
+            'wildcard without known target hosts in an empty string' => [['stateSigning' => ['keyId' => self::KEY_ID, 'secretKey' => base64_encode(str_repeat('k', SODIUM_CRYPTO_SIGN_SECRETKEYBYTES)), 'allowedHostPatterns' => '*.cell-1.example.com', 'knownTargetHosts' => '']], 1793957288],
+            'state signing with keys but an empty host pattern string' => [['stateSigning' => ['keyId' => self::KEY_ID, 'secretKey' => base64_encode(str_repeat('k', SODIUM_CRYPTO_SIGN_SECRETKEYBYTES)), 'allowedHostPatterns' => ' , ']], 1793956459],
+            'key id of whitespace only' => [['stateSigning' => ['keyId' => '  ', 'secretKey' => base64_encode(str_repeat('k', SODIUM_CRYPTO_SIGN_SECRETKEYBYTES)), 'allowedHostPatterns' => ['acme.cell-1.example.com']]], 1793956459],
+            'secret key of whitespace only' => [['stateSigning' => ['keyId' => self::KEY_ID, 'secretKey' => '  ', 'allowedHostPatterns' => ['acme.cell-1.example.com']]], 1793956459],
             'relay over HTTP' => [['redirectUri' => 'http://relay.example.com/oauth2/oidc/test/finishauthorization'], 1793957289],
             'known target hosts which do not implement the interface' => [['stateSigning' => ['keyId' => self::KEY_ID, 'secretKey' => base64_encode(str_repeat('k', SODIUM_CRYPTO_SIGN_SECRETKEYBYTES)), 'allowedHostPatterns' => ['*.cell-1.example.com'], 'knownTargetHosts' => 'Acme\KnownTargetHosts']], 1793956458],
         ];
@@ -296,15 +351,15 @@ class RelayReturnTest extends TestCase
     /**
      * Returns the OpenID Connect client of a request to the host, as every request creates it anew
      */
-    private function createClientOnHost(array $serviceOptions = [], ?object $knownTargetHosts = null, string $host = self::HOST, array $middlewareSettings = []): OpenIdConnectClient
+    private function createClientOnHost(array $serviceOptions = [], ?object $knownTargetHosts = null, string $host = self::HOST, array $middlewareSettings = [], ?LoggerInterface $logger = null): OpenIdConnectClient
     {
-        return $this->createClientsOnHost($serviceOptions, $knownTargetHosts, $host, $middlewareSettings)[0];
+        return $this->createClientsOnHost($serviceOptions, $knownTargetHosts, $host, $middlewareSettings, $logger)[0];
     }
 
     /**
      * @return array{OpenIdConnectClient, OAuthClientOfHost}
      */
-    private function createClientsOnHost(array $serviceOptions = [], ?object $knownTargetHosts = null, string $host = self::HOST, array $middlewareSettings = []): array
+    private function createClientsOnHost(array $serviceOptions = [], ?object $knownTargetHosts = null, string $host = self::HOST, array $middlewareSettings = [], ?LoggerInterface $logger = null): array
     {
         $objectManager = $this->createStub(ObjectManagerInterface::class);
         $objectManager->method('get')->willReturn($knownTargetHosts ?? new class implements KnownTargetHostsInterface {
@@ -324,7 +379,7 @@ class RelayReturnTest extends TestCase
         OpenIdConnectClientFixture::inject($oAuthClient, 'httpClientFactory', $httpClientFactory);
         OpenIdConnectClientFixture::inject($oAuthClient, 'logger', $this->createStub(LoggerInterface::class));
 
-        $client = OpenIdConnectClientFixture::createClient($oAuthClient, $this->hashService, $this->createStub(LoggerInterface::class), JwtFixture::createJwks(), null, array_merge(['authorizationEndpoint' => self::AUTHORIZATION_ENDPOINT], $serviceOptions), $objectManager, $middlewareSettings);
+        $client = OpenIdConnectClientFixture::createClient($oAuthClient, $this->hashService, $logger ?? $this->createStub(LoggerInterface::class), JwtFixture::createJwks(), null, array_merge(['authorizationEndpoint' => self::AUTHORIZATION_ENDPOINT], $serviceOptions), $objectManager, $middlewareSettings);
         $oAuthClient->setOpenIdConnectClient($client);
         return [$client, $oAuthClient];
     }

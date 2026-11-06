@@ -153,7 +153,7 @@ final class OpenIdConnectClient
         if (($this->options['redirectUri'] ?? '') !== '' && parse_url($this->options['redirectUri'], PHP_URL_SCHEME) !== 'https' && CookieSettings::fromMiddlewareSettings($this->middlewareSettings)->secure) {
             throw new ConfigurationException(sprintf('OpenID Connect Client: The redirect URI of service "%s" must use HTTPS, unless the login cookies are not secure.', $this->serviceName), 1793957289);
         }
-        if (isset($this->options['stateSigning'])) {
+        if (isset($this->options['stateSigning']) && !self::isUnsetStateSigning($this->options['stateSigning'])) {
             $this->stateSigner = $this->createStateSigner($this->options['stateSigning']);
         }
 
@@ -180,6 +180,9 @@ final class OpenIdConnectClient
      */
     public function getStateSigner(): ?StateSigner
     {
+        if ($this->stateSigner === null && $this->getRedirectUri() !== null && self::isUnsetStateSigning($this->options['stateSigning'] ?? null)) {
+            $this->logger?->error(sprintf('OpenID Connect Client: The redirect URI of service "%s" is set, but "keyId" and "secretKey" of "stateSigning" are empty, so no state is signed and a relay can\'t forward the return.', $this->serviceName), LogEnvironment::fromMethodName(__METHOD__));
+        }
         return $this->stateSigner;
     }
 
@@ -571,7 +574,13 @@ final class OpenIdConnectClient
      */
     private function createStateSigner(mixed $stateSigningOptions): StateSigner
     {
+        if (is_array($stateSigningOptions) && is_string($stateSigningOptions['allowedHostPatterns'] ?? null)) {
+            $stateSigningOptions['allowedHostPatterns'] = self::hostPatternsFromString($stateSigningOptions['allowedHostPatterns']);
+        }
         $knownTargetHostsObjectName = $stateSigningOptions['knownTargetHosts'] ?? null;
+        if ($knownTargetHostsObjectName === '') {
+            $knownTargetHostsObjectName = null;
+        }
         if (!is_array($stateSigningOptions)
             || !is_string($stateSigningOptions['keyId'] ?? null)
             || !is_string($stateSigningOptions['secretKey'] ?? null)
@@ -579,6 +588,9 @@ final class OpenIdConnectClient
             || ($knownTargetHostsObjectName !== null && !is_string($knownTargetHostsObjectName))
         ) {
             throw new ConfigurationException(sprintf('OpenID Connect Client: The option "stateSigning" of service "%s" needs the strings "keyId" and "secretKey", the list "allowedHostPatterns" and optionally the object name "knownTargetHosts".', $this->serviceName), 1793956457);
+        }
+        if ($stateSigningOptions['keyId'] === '' || $stateSigningOptions['secretKey'] === '') {
+            throw new ConfigurationException(sprintf('OpenID Connect Client: The option "stateSigning" of service "%s" needs both "keyId" and "secretKey", or neither of them to sign no state.', $this->serviceName), 1793980403);
         }
         $wildcardPatterns = array_filter($stateSigningOptions['allowedHostPatterns'], static fn (mixed $pattern): bool => is_string($pattern) && str_starts_with($pattern, '*.'));
         // Without the check, a name under the wildcard which no tenant owns any more would receive the codes of other users
@@ -611,6 +623,22 @@ final class OpenIdConnectClient
                 throw new InvalidArgumentException('OpenID Connect Client: The authorization parameters must be strings with names.', 1791540883);
             }
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function hostPatternsFromString(string $hostPatterns): array
+    {
+        return array_values(array_filter(array_map(trim(...), explode(',', $hostPatterns)), static fn (string $pattern): bool => $pattern !== ''));
+    }
+
+    /**
+     * Empty strings stand for an absent key, as environment variables can't leave an option out
+     */
+    private static function isUnsetStateSigning(mixed $stateSigningOptions): bool
+    {
+        return is_array($stateSigningOptions) && ($stateSigningOptions['keyId'] ?? null) === '' && ($stateSigningOptions['secretKey'] ?? null) === '';
     }
 
     private static function isAbsoluteHttpUri(mixed $value): bool
