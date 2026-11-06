@@ -232,6 +232,17 @@ class RelayReturnTest extends TestCase
     }
 
     #[Test]
+    public function clientTreatsARedirectUriOfOnlyAPathAsNotConfigured(): void
+    {
+        $client = $this->createClientOnHost(['redirectUri' => '/oauth2/oidc/test/finishauthorization']);
+
+        $authorizationUri = $client->startAuthorization(new Uri(self::RETURN_TO_URI), 'profile', Nonce::generate());
+
+        self::assertNull($client->getRedirectUri());
+        self::assertMatchesRegularExpression('/^[a-f0-9]{32}\z/', self::getState($authorizationUri));
+    }
+
+    #[Test]
     public function clientLogsAnErrorIfTheRedirectUriIsSetButTheSigningKeysAreEmpty(): void
     {
         $logger = $this->createMock(LoggerInterface::class);
@@ -271,7 +282,8 @@ class RelayReturnTest extends TestCase
     public static function invalidRelayOptions(): array
     {
         return [
-            'relative redirect URI' => [['redirectUri' => '/oauth2/oidc/test/finishauthorization'], 1793956456],
+            'redirect URI without scheme' => [['redirectUri' => 'relay.example.com/oauth2/oidc/test/finishauthorization'], 1793956456],
+            'protocol-relative redirect URI' => [['redirectUri' => '//relay.example.com/oauth2/oidc/test/finishauthorization'], 1793956456],
             'state signing without key id' => [['stateSigning' => ['secretKey' => 'key', 'allowedHostPatterns' => ['*.cell-1.example.com']]], 1793956457],
             'state signing without host patterns' => [['stateSigning' => ['keyId' => self::KEY_ID, 'secretKey' => 'key']], 1793956457],
             'state signing which is no array' => [['stateSigning' => 'cell-1'], 1793956457],

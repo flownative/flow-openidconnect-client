@@ -489,6 +489,12 @@ signed, the client logs an error and sign-ins through the relay fail.
 empty `knownTargetHosts` counts as not configured. Up to version 6.2,
 an empty `keyId` and `secretKey` were refused as an invalid key.
 
+A `redirectUri` of only a path, such as `/oidc/callback`, counts as not
+configured as well. So a fixed path may follow the variable, as in
+`'%env(string):OIDC_RELAY_HOST_URI%/oidc/callback'`, and an empty
+variable leaves the relay off. Up to version 6.3, such a path was
+refused as not an absolute URI.
+
 The following options replace those of the example above. With the
 type `string`, an unset variable becomes an empty string; a plain
 `%env:NAME%` yields `false` for an unset variable, which the client
