@@ -422,6 +422,69 @@ $this->response->setHttpHeader('Cache-Control', 'no-store');
 $this->redirectToUri($uri);
 ```
 
+### Returns through a Relay
+
+Identity providers usually accept only redirect URIs which are
+registered exactly. An application which serves many host names, for
+example one per customer, can let all returns arrive at a single relay
+host instead. The relay forwards each return to the host which started
+the login, and that host finishes it as usual: with its own state, the
+cookie of the nonce, PKCE and the checks of the identity token. The
+relay itself is not part of this package; the flownative/oauth2-client
+package describes what it must check and provides the `StateVerifier`
+for it.
+
+Two options of the service enable the relay. Both are off by default,
+and the login then works exactly as without them:
+
+```yaml
+Flownative:
+  OpenIdConnect:
+    Client:
+      services:
+        exampleService:
+          options:
+            discoveryUri: 'https://id.example.com/.well-known/openid-configuration'
+            clientId: 'the-client-id'
+            clientSecret: '%env:OIDC_CLIENT_SECRET%'
+            redirectUri: 'https://login.example.com/oauth2/oidc/exampleService/finishauthorization'
+            stateSigning:
+              keyId: 'cell-1'
+              secretKey: '%env:OIDC_STATE_SIGNING_KEY%'
+              allowedHostPatterns: ['*.cell-1.example.com']
+              knownTargetHosts: 'Acme\Tenancy\KnownTenantHosts'
+```
+
+`redirectUri` replaces the finish authorization URI of the current host
+in the authorization request and in the token request. Register it at
+the identity provider.
+
+`stateSigning` names the current host in the state, signed with the
+Ed25519 secret key, so that the relay knows where to forward the
+return. Generate a key pair for each installation with
+`./flow oauth:generatestatesigningkey`, give the secret key only to
+that installation, and the public key and the key id to the relay. The
+signer refuses hosts outside of `allowedHostPatterns`; the login then
+fails and nothing is sent to the identity provider. If a pattern
+starts with a wildcard, `knownTargetHosts` is required: the object
+name of an implementation of `KnownTargetHostsInterface`, which tells
+whether a host belongs to a tenant of your application. Without it, a
+state would be signed for any matching host which a request names in
+its `Host` header, so the client refuses such a configuration. Keep
+the DNS zone under the wildcard clean all the same: remove the records
+of former tenants, so that no dangling name points elsewhere.
+
+The redirect URI must use HTTPS, because the relay receives the
+authorization code. Only with insecure login cookies, for development
+without HTTPS, an `http://` redirect URI is accepted.
+
+Configure `redirectUri` together with `stateSigning`. A redirect URI of
+another host without a signed state can't be forwarded, and the OAuth
+client logs a warning when a login starts.
+
+Signing out of all hosts at once, through back-channel logout, is a
+separate feature (pull request #98).
+
 ### JWT Cookie
 
 After a successful login, the middleware stores the identity token in a
