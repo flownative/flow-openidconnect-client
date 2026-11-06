@@ -146,11 +146,11 @@ final class OpenIdConnectClient
         if ($endSessionEndpoint !== '' && !self::isAbsoluteHttpUri($endSessionEndpoint)) {
             throw new ConfigurationException(sprintf('OpenID Connect Client: The end session endpoint of service "%s" is not an absolute URI.', $this->serviceName), 1791540876);
         }
-        if (($this->options['redirectUri'] ?? '') !== '' && !self::isAbsoluteHttpUri($this->options['redirectUri'])) {
+        if ($this->getRedirectUri() !== null && !self::isAbsoluteHttpUri($this->options['redirectUri'])) {
             throw new ConfigurationException(sprintf('OpenID Connect Client: The redirect URI of service "%s" is not an absolute URI.', $this->serviceName), 1793956456);
         }
         // The relay receives the code, which must not travel in clear outside of development without HTTPS
-        if (($this->options['redirectUri'] ?? '') !== '' && parse_url($this->options['redirectUri'], PHP_URL_SCHEME) !== 'https' && CookieSettings::fromMiddlewareSettings($this->middlewareSettings)->secure) {
+        if ($this->getRedirectUri() !== null && parse_url($this->options['redirectUri'], PHP_URL_SCHEME) !== 'https' && CookieSettings::fromMiddlewareSettings($this->middlewareSettings)->secure) {
             throw new ConfigurationException(sprintf('OpenID Connect Client: The redirect URI of service "%s" must use HTTPS, unless the login cookies are not secure.', $this->serviceName), 1793957289);
         }
         if (isset($this->options['stateSigning']) && !self::isUnsetStateSigning($this->options['stateSigning'])) {
@@ -172,7 +172,7 @@ final class OpenIdConnectClient
     public function getRedirectUri(): ?string
     {
         $redirectUri = $this->options['redirectUri'] ?? '';
-        return $redirectUri === '' ? null : $redirectUri;
+        return self::isUnsetRedirectUri($redirectUri) ? null : $redirectUri;
     }
 
     /**
@@ -639,6 +639,14 @@ final class OpenIdConnectClient
     private static function isUnsetStateSigning(mixed $stateSigningOptions): bool
     {
         return is_array($stateSigningOptions) && ($stateSigningOptions['keyId'] ?? null) === '' && ($stateSigningOptions['secretKey'] ?? null) === '';
+    }
+
+    /**
+     * A bare path stands for an absent URI, as an empty environment variable in front of a fixed path leaves only the path
+     */
+    private static function isUnsetRedirectUri(mixed $redirectUri): bool
+    {
+        return $redirectUri === '' || (is_string($redirectUri) && str_starts_with($redirectUri, '/') && parse_url($redirectUri, PHP_URL_SCHEME) === null && parse_url($redirectUri, PHP_URL_HOST) === null);
     }
 
     private static function isAbsoluteHttpUri(mixed $value): bool
